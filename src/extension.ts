@@ -37,48 +37,6 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("lynvo.openInsights", () => {
-      LynvoPanel.render(context.extensionUri);
-      LynvoPanel.setActiveView("insights");
-    }),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("lynvo.openLabels", () => {
-      LynvoPanel.render(context.extensionUri);
-      LynvoPanel.setActiveView("labels");
-    }),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("lynvo.syncBoard", async () => {
-      const result = await LynvoPanel.syncBoard();
-      if (result.success) {
-        vscode.window.showInformationMessage(result.message);
-      } else {
-        vscode.window.showWarningMessage(result.message);
-      }
-    }),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("lynvo.createTaskQuick", async () => {
-      const title = await vscode.window.showInputBox({
-        prompt: "Título de la tarea",
-      });
-      if (!title?.trim()) return;
-
-      const description = await vscode.window.showInputBox({
-        prompt: "Descripción (opcional)",
-      });
-
-      await DataManager.createTask(title.trim(), description?.trim() || "");
-      vscode.window.showInformationMessage("Tarea creada en Lynvo.");
-      LynvoPanel.refreshData();
-    }),
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand("lynvo.createTaskFromCode", async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
@@ -100,7 +58,6 @@ export function activate(context: vscode.ExtensionContext) {
       const codeRef = {
         filePath: filePath,
         lineStart: selection.start.line + 1,
-        lineEnd: selection.end.line + 1,
       };
 
       const title = await vscode.window.showInputBox({
@@ -109,7 +66,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (!title) return;
 
       // Usamos el DataManager que ya tienes, que está perfecto
-      await DataManager.createTask(title, text, undefined, [], codeRef, "high");
+      await DataManager.createTask(title, text, undefined, [], codeRef);
 
       vscode.window.showInformationMessage("Tarea creada en Lynvo.");
       LynvoPanel.refreshData();
