@@ -11,21 +11,6 @@ const formatDateTime = (timestamp: number) => {
   return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 };
 
-const PRIORITY_ORDER: Record<"low" | "medium" | "high", number> = {
-  high: 0,
-  medium: 1,
-  low: 2,
-};
-
-const PRIORITY_META: Record<
-  "low" | "medium" | "high",
-  { label: string; color: string }
-> = {
-  high: { label: "High", color: "#f85149" },
-  medium: { label: "Medium", color: "#d29922" },
-  low: { label: "Low", color: "#2ea043" },
-};
-
 export const App: React.FC = () => {
   const [boardData, setBoardData] = useState<LynvoBoard | null>(null);
   const [activeView, setActiveView] = useState<"board" | "insights" | "labels">(
@@ -42,17 +27,11 @@ export const App: React.FC = () => {
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDesc, setNewTaskDesc] = useState("");
   const [newTaskLabels, setNewTaskLabels] = useState<string[]>([]);
-  const [newTaskPriority, setNewTaskPriority] = useState<
-    "low" | "medium" | "high"
-  >("medium");
 
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editLabelIds, setEditLabelIds] = useState<string[]>([]);
-  const [editTaskPriority, setEditTaskPriority] = useState<
-    "low" | "medium" | "high"
-  >("medium");
 
   // --- ESTADOS DE COLUMNAS ---
   const [isAddingColumn, setIsAddingColumn] = useState(false);
@@ -77,8 +56,6 @@ export const App: React.FC = () => {
       if (event.data.command === "loadData") {
         setBoardData(event.data.data);
         setIsSyncing(false);
-      } else if (event.data.command === "setView") {
-        setActiveView(event.data.view);
       }
     };
     window.addEventListener("message", handleMessage);
@@ -143,7 +120,6 @@ export const App: React.FC = () => {
     setNewTaskTitle("");
     setNewTaskDesc("");
     setNewTaskLabels([]);
-    setNewTaskPriority("medium");
   };
 
   const submitNewTask = () => {
@@ -154,7 +130,6 @@ export const App: React.FC = () => {
       description: newTaskDesc,
       targetColId: addingTaskColId,
       labelIds: newTaskLabels,
-      priority: newTaskPriority,
     });
     setAddingTaskColId(null);
   };
@@ -164,7 +139,6 @@ export const App: React.FC = () => {
     setEditTitle(task.title);
     setEditDesc(task.description);
     setEditLabelIds(task.labelIds || []);
-    setEditTaskPriority(task.priority || "medium");
   };
 
   const saveEditTask = () => {
@@ -175,7 +149,6 @@ export const App: React.FC = () => {
       title: editTitle,
       description: editDesc,
       labelIds: editLabelIds,
-      priority: editTaskPriority,
     });
     setEditingTaskId(null);
   };
@@ -226,22 +199,20 @@ export const App: React.FC = () => {
     );
     const idx = cols.findIndex((c) => c.id === colId);
 
-    const nextCols = cols.map((col) => ({ ...col }));
-
     if (direction === "left" && idx > 0) {
-      const temp = nextCols[idx].position;
-      nextCols[idx].position = nextCols[idx - 1].position;
-      nextCols[idx - 1].position = temp;
-    } else if (direction === "right" && idx < nextCols.length - 1) {
-      const temp = nextCols[idx].position;
-      nextCols[idx].position = nextCols[idx + 1].position;
-      nextCols[idx + 1].position = temp;
+      const temp = cols[idx].position;
+      cols[idx].position = cols[idx - 1].position;
+      cols[idx - 1].position = temp;
+    } else if (direction === "right" && idx < cols.length - 1) {
+      const temp = cols[idx].position;
+      cols[idx].position = cols[idx + 1].position;
+      cols[idx + 1].position = temp;
     } else return;
 
-    const updates = nextCols.map((c) => ({ id: c.id, position: c.position }));
+    const updates = cols.map((c) => ({ id: c.id, position: c.position }));
     setBoardData({
       ...boardData,
-      columns: Object.fromEntries(nextCols.map((c) => [c.id, c])),
+      columns: Object.fromEntries(cols.map((c) => [c.id, c])),
     });
     vscode.postMessage({ command: "reorderColumns", updates });
   };
@@ -263,16 +234,8 @@ export const App: React.FC = () => {
           (t.labelIds && t.labelIds.includes(activeFilterLabel)),
       )
       .sort(
-        (a, b) =>
-          PRIORITY_ORDER[a.priority || "medium"] -
-            PRIORITY_ORDER[b.priority || "medium"] ||
-          (a.position ?? a.createdAt) - (b.position ?? b.createdAt),
+        (a, b) => (a.position ?? a.createdAt) - (b.position ?? b.createdAt),
       );
-  };
-
-  const clearFilters = () => {
-    setSearchTerm("");
-    setActiveFilterLabel("");
   };
 
   const renderLabelSelector = (
@@ -360,19 +323,6 @@ export const App: React.FC = () => {
               }}
             />
             {renderLabelSelector(editLabelIds, setEditLabelIds)}
-            <select
-              value={editTaskPriority}
-              onChange={(e) =>
-                setEditTaskPriority(
-                  e.target.value as "low" | "medium" | "high",
-                )
-              }
-              style={{ width: "100%", marginBottom: "8px", padding: "5px" }}
-            >
-              <option value="high">Priority: High</option>
-              <option value="medium">Priority: Medium</option>
-              <option value="low">Priority: Low</option>
-            </select>
             <div
               style={{
                 display: "flex",
@@ -506,19 +456,6 @@ export const App: React.FC = () => {
             >
               {task.description}
             </p>
-            <span
-              style={{
-                display: "inline-block",
-                marginBottom: "8px",
-                fontSize: "10px",
-                borderRadius: "10px",
-                padding: "2px 8px",
-                border: `1px solid ${PRIORITY_META[task.priority || "medium"].color}`,
-                color: PRIORITY_META[task.priority || "medium"].color,
-              }}
-            >
-              ⚑ {PRIORITY_META[task.priority || "medium"].label}
-            </span>
             <div
               style={{
                 display: "flex",
@@ -641,27 +578,11 @@ export const App: React.FC = () => {
   const renderInsights = () => {
     if (!boardData) return null;
     const tasks = Object.values(boardData.tasks);
-    const sortedColumns = Object.values(boardData.columns).sort(
-      (a, b) => a.position - b.position,
-    );
-    const doneColumnIds = new Set(
-      sortedColumns
-        .filter((c) => /(done|hecho|complet|cerrad)/i.test(c.title))
-        .map((c) => c.id),
-    );
-    const fallbackDoneColumn = sortedColumns[sortedColumns.length - 1]?.id;
-    if (doneColumnIds.size === 0 && fallbackDoneColumn) {
-      doneColumnIds.add(fallbackDoneColumn);
-    }
-    const done = tasks.filter((t) => doneColumnIds.has(t.status)).length;
+    const done = tasks.filter((t) =>
+      boardData.columns[t.status]?.title.toLowerCase().includes("done"),
+    ).length;
     const percent =
       tasks.length === 0 ? 0 : Math.round((done / tasks.length) * 100);
-    const staleTasks = tasks.filter(
-      (task) => Date.now() - task.updatedAt > 1000 * 60 * 60 * 24 * 7,
-    ).length;
-    const highPriorityOpen = tasks.filter(
-      (task) => (task.priority || "medium") === "high" && !doneColumnIds.has(task.status),
-    ).length;
 
     const statusStats = tasks.reduce(
       (acc, task) => {
@@ -742,20 +663,6 @@ export const App: React.FC = () => {
               </li>
             ))}
           </ul>
-        </div>
-        <div
-          style={{
-            flex: "1 1 300px",
-            backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)",
-            padding: "20px",
-            borderRadius: "6px",
-          }}
-        >
-          <h3 style={{ marginTop: 0 }}>Risk Signals</h3>
-          <p style={{ margin: "0 0 8px 0" }}>⚠️ Stale tasks (&gt; 7 days): <strong>{staleTasks}</strong></p>
-          <p style={{ margin: 0 }}>
-            🔥 Open high-priority tasks: <strong>{highPriorityOpen}</strong>
-          </p>
         </div>
       </div>
     );
@@ -881,17 +788,14 @@ export const App: React.FC = () => {
                 ))}
             </select>
             {isFiltering && (
-              <>
-                <span
-                  style={{
-                    fontSize: "10px",
-                    color: "var(--vscode-editorWarning-foreground)",
-                  }}
-                >
-                  Drag & Drop disabled
-                </span>
-                <button onClick={clearFilters}>Clear</button>
-              </>
+              <span
+                style={{
+                  fontSize: "10px",
+                  color: "var(--vscode-editorWarning-foreground)",
+                }}
+              >
+                Drag & Drop disabled
+              </span>
             )}
           </div>
         )}
@@ -1049,23 +953,6 @@ export const App: React.FC = () => {
                       }}
                     />
                     {renderLabelSelector(newTaskLabels, setNewTaskLabels)}
-                    <select
-                      value={newTaskPriority}
-                      onChange={(e) =>
-                        setNewTaskPriority(
-                          e.target.value as "low" | "medium" | "high",
-                        )
-                      }
-                      style={{
-                        width: "100%",
-                        marginBottom: "8px",
-                        padding: "5px",
-                      }}
-                    >
-                      <option value="high">Priority: High</option>
-                      <option value="medium">Priority: Medium</option>
-                      <option value="low">Priority: Low</option>
-                    </select>
                     <div style={{ display: "flex", gap: "5px" }}>
                       <button
                         onClick={() => setAddingTaskColId(null)}
@@ -1107,19 +994,6 @@ export const App: React.FC = () => {
                 )}
 
                 {getTasksByStatusFiltered(col.id).map(renderTaskCard)}
-                {getTasksByStatusFiltered(col.id).length === 0 && (
-                  <div
-                    style={{
-                      padding: "10px",
-                      opacity: 0.7,
-                      fontSize: "12px",
-                      border: "1px dashed var(--vscode-widget-border)",
-                      borderRadius: "6px",
-                    }}
-                  >
-                    No tasks yet in this column.
-                  </div>
-                )}
               </div>
             ))}
 
