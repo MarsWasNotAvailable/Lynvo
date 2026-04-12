@@ -1,5 +1,3 @@
-// src/types.ts
-
 export interface LynvoUser {
   githubId: string;
   username: string;
@@ -12,15 +10,13 @@ export interface CodeReference {
   lineEnd: number;
 }
 
-// NUEVO: Definición de una Columna
 export interface LynvoColumn {
-  id: string; // Identificador único (ej: "col-123")
-  title: string; // Nombre visible (ej: "En espera")
-  color: string; // Color en formato Hex o CSS variable
+  id: string;
+  title: string;
+  color: string;
   position: number;
 }
 
-// NUEVO: Definición de una Etiqueta
 export interface LynvoLabel {
   id: string;
   name: string;
@@ -31,20 +27,21 @@ export interface LynvoTask {
   id: string;
   title: string;
   description: string;
-  status: string; // Ahora apunta al ID de una columna dinámica
+  status: string;
   createdBy: LynvoUser;
   lastModifiedBy: LynvoUser;
   createdAt: number;
   updatedAt: number;
   codeReference?: CodeReference;
   position?: number;
-  labelIds?: string[]; // Referencia a las etiquetas
+  labelIds?: string[];
   priority?: "low" | "medium" | "high";
+  dueDate?: number;
 }
 
 export interface LynvoBoard {
   version: string;
-  columns: Record<string, LynvoColumn>; // NUEVO: Diccionario de columnas
+  columns: Record<string, LynvoColumn>;
   tasks: Record<string, LynvoTask>;
-  labels?: Record<string, LynvoLabel>; // NUEVO: Diccionario de etiquetas
+  labels?: Record<string, LynvoLabel>;
 }
