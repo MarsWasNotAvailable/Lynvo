@@ -5,6 +5,7 @@ import { GitService } from "./GitService";
 
 export class LynvoPanel {
   public static currentPanel: LynvoPanel | undefined;
+  private static pendingView: "board" | "insights" | "labels" | null = null;
   private readonly _panel: vscode.WebviewPanel;
   private _disposables: vscode.Disposable[] = [];
 
@@ -45,6 +46,22 @@ export class LynvoPanel {
     }
   }
 
+  public static setActiveView(view: "board" | "insights" | "labels") {
+    LynvoPanel.pendingView = view;
+    if (LynvoPanel.currentPanel) {
+      LynvoPanel.currentPanel._panel.webview.postMessage({
+        command: "setView",
+        view,
+      });
+    }
+  }
+
+  public static async syncBoard(): Promise<{ success: boolean; message: string }> {
+    const result = await GitService.syncBoard();
+    await LynvoPanel.refreshData();
+    return result;
+  }
+
   public dispose() {
     LynvoPanel.currentPanel = undefined;
     this._panel.dispose();
@@ -63,6 +80,12 @@ export class LynvoPanel {
           case "requestData":
             const board = await DataManager.loadBoard();
             webview.postMessage({ command: "loadData", data: board });
+            if (LynvoPanel.pendingView) {
+              webview.postMessage({
+                command: "setView",
+                view: LynvoPanel.pendingView,
+              });
+            }
             return;
           case "updateTaskStatus":
             await DataManager.updateTaskStatus(
@@ -81,6 +104,8 @@ export class LynvoPanel {
               message.description,
               message.targetColId,
               message.labelIds,
+              undefined,
+              message.priority,
             );
             LynvoPanel.refreshData();
             return;
@@ -90,6 +115,7 @@ export class LynvoPanel {
               message.title,
               message.description,
               message.labelIds,
+              message.priority,
             );
             LynvoPanel.refreshData();
             return;
@@ -140,13 +166,12 @@ export class LynvoPanel {
             LynvoPanel.refreshData();
             return;
           case "syncBoard":
-            const result = await GitService.syncBoard();
+            const result = await LynvoPanel.syncBoard();
             if (result.success) {
               vscode.window.showInformationMessage(result.message);
             } else {
               vscode.window.showWarningMessage(result.message);
             }
-            LynvoPanel.refreshData();
             return;
           case "openCode":
             const folders = vscode.workspace.workspaceFolders;
