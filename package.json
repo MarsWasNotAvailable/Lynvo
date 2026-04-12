@@ -17,12 +17,32 @@
   "contributes": {
     "commands": [
       {
+        "command": "lynvo.connectGitHub",
+        "title": "Lynvo: Connect GitHub"
+      },
+      {
         "command": "lynvo.testAuth",
         "title": "Lynvo: Test GitHub Identity"
       },
       {
         "command": "lynvo.openBoard",
         "title": "Lynvo: Open Project Board"
+      },
+      {
+        "command": "lynvo.openInsights",
+        "title": "Lynvo: Open Insights View"
+      },
+      {
+        "command": "lynvo.openLabels",
+        "title": "Lynvo: Open Labels Manager"
+      },
+      {
+        "command": "lynvo.quickCreateTask",
+        "title": "Lynvo: Quick Create Task"
+      },
+      {
+        "command": "lynvo.syncBoard",
+        "title": "Lynvo: Sync Team Board"
       },
       {
         "command": "lynvo.createTaskFromCode",

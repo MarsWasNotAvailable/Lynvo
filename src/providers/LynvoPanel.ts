@@ -1,7 +1,8 @@
-// src/providers/LynvoPanel.ts
 import * as vscode from "vscode";
 import { DataManager } from "./DataManager";
 import { GitService } from "./GitService";
+
+type LynvoView = "board" | "insights" | "labels";
 
 export class LynvoPanel {
   public static currentPanel: LynvoPanel | undefined;
@@ -18,9 +19,13 @@ export class LynvoPanel {
     this._setWebviewMessageListener(this._panel.webview);
   }
 
-  public static render(extensionUri: vscode.Uri) {
+  public static render(extensionUri: vscode.Uri, initialView: LynvoView = "board") {
     if (LynvoPanel.currentPanel) {
       LynvoPanel.currentPanel._panel.reveal(vscode.ViewColumn.One);
+      LynvoPanel.currentPanel._panel.webview.postMessage({
+        command: "switchView",
+        view: initialView,
+      });
     } else {
       const panel = vscode.window.createWebviewPanel(
         "lynvoBoard",
@@ -32,6 +37,10 @@ export class LynvoPanel {
         },
       );
       LynvoPanel.currentPanel = new LynvoPanel(panel, extensionUri);
+      LynvoPanel.currentPanel._panel.webview.postMessage({
+        command: "switchView",
+        view: initialView,
+      });
     }
   }
 
@@ -50,9 +59,7 @@ export class LynvoPanel {
     this._panel.dispose();
     while (this._disposables.length) {
       const disposable = this._disposables.pop();
-      if (disposable) {
-        disposable.dispose();
-      }
+      disposable?.dispose();
     }
   }
 
@@ -60,15 +67,13 @@ export class LynvoPanel {
     webview.onDidReceiveMessage(
       async (message: any) => {
         switch (message.command) {
-          case "requestData":
+          case "requestData": {
             const board = await DataManager.loadBoard();
             webview.postMessage({ command: "loadData", data: board });
             return;
+          }
           case "updateTaskStatus":
-            await DataManager.updateTaskStatus(
-              message.taskId,
-              message.newStatus,
-            );
+            await DataManager.updateTaskStatus(message.taskId, message.newStatus);
             LynvoPanel.refreshData();
             return;
           case "reorderTasks":
@@ -81,6 +86,9 @@ export class LynvoPanel {
               message.description,
               message.targetColId,
               message.labelIds,
+              message.codeReference,
+              message.priority,
+              message.dueDate,
             );
             LynvoPanel.refreshData();
             return;
@@ -90,10 +98,12 @@ export class LynvoPanel {
               message.title,
               message.description,
               message.labelIds,
+              message.priority,
+              message.dueDate,
             );
             LynvoPanel.refreshData();
             return;
-          case "deleteTask":
+          case "deleteTask": {
             const confirmTask = await vscode.window.showWarningMessage(
               "Delete task?",
               { modal: true },
@@ -104,19 +114,16 @@ export class LynvoPanel {
               LynvoPanel.refreshData();
             }
             return;
+          }
           case "createColumn":
             await DataManager.createColumn(message.title, message.color);
             LynvoPanel.refreshData();
             return;
           case "editColumn":
-            await DataManager.editColumn(
-              message.colId,
-              message.title,
-              message.color,
-            );
+            await DataManager.editColumn(message.colId, message.title, message.color);
             LynvoPanel.refreshData();
             return;
-          case "deleteColumn":
+          case "deleteColumn": {
             const confirmCol = await vscode.window.showWarningMessage(
               "Delete column? ALL TASKS inside will be deleted.",
               { modal: true },
@@ -127,6 +134,7 @@ export class LynvoPanel {
               LynvoPanel.refreshData();
             }
             return;
+          }
           case "reorderColumns":
             await DataManager.reorderColumns(message.updates);
             LynvoPanel.refreshData();
@@ -139,7 +147,7 @@ export class LynvoPanel {
             await DataManager.deleteLabel(message.labelId);
             LynvoPanel.refreshData();
             return;
-          case "syncBoard":
+          case "syncBoard": {
             const result = await GitService.syncBoard();
             if (result.success) {
               vscode.window.showInformationMessage(result.message);
@@ -148,26 +156,25 @@ export class LynvoPanel {
             }
             LynvoPanel.refreshData();
             return;
-          case "openCode":
+          }
+          case "openCode": {
             const folders = vscode.workspace.workspaceFolders;
-            if (folders) {
-              const fileUri = vscode.Uri.joinPath(
-                folders[0].uri,
-                message.filePath,
-              );
-              const doc = await vscode.workspace.openTextDocument(fileUri);
-              const editor = await vscode.window.showTextDocument(
-                doc,
-                vscode.ViewColumn.Beside,
-              );
-              const pos = new vscode.Position(message.lineStart - 1, 0);
-              editor.selection = new vscode.Selection(pos, pos);
-              editor.revealRange(
-                new vscode.Range(pos, pos),
-                vscode.TextEditorRevealType.InCenter,
-              );
-            }
+            if (!folders || folders.length === 0) return;
+
+            const fileUri = vscode.Uri.joinPath(folders[0].uri, message.filePath);
+            const doc = await vscode.workspace.openTextDocument(fileUri);
+            const editor = await vscode.window.showTextDocument(
+              doc,
+              vscode.ViewColumn.Beside,
+            );
+            const pos = new vscode.Position(message.lineStart - 1, 0);
+            editor.selection = new vscode.Selection(pos, pos);
+            editor.revealRange(
+              new vscode.Range(pos, pos),
+              vscode.TextEditorRevealType.InCenter,
+            );
             return;
+          }
         }
       },
       undefined,
@@ -175,30 +182,30 @@ export class LynvoPanel {
     );
   }
 
-  private _getWebviewContent(
-    webview: vscode.Webview,
-    extensionUri: vscode.Uri,
-  ) {
+  private _getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri) {
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(extensionUri, "dist", "webview.js"),
     );
     const nonce = getNonce();
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
             body { overflow-x: hidden; font-family: var(--vscode-font-family); }
-            .icon-btn { cursor: pointer; opacity: 0.6; background: transparent; border: none; color: var(--vscode-foreground); font-size: 14px; }
+            .icon-btn { cursor: pointer; opacity: 0.7; background: transparent; border: none; color: var(--vscode-foreground); font-size: 14px; }
             .icon-btn:hover { opacity: 1; }
             .icon-btn.delete:hover { color: var(--vscode-errorForeground); }
-            input, textarea, select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 2px; }
+            input, textarea, select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 4px; }
+            button { border-radius: 4px; }
             input[type="color"] { -webkit-appearance: none; border: none; width: 25px; height: 25px; cursor: pointer; padding: 0; background: transparent; }
             input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
             input[type="color"]::-webkit-color-swatch { border: 1px solid var(--vscode-widget-border); border-radius: 4px; }
         </style></head><body><div id="root"></div><script nonce="${nonce}" src="${scriptUri}"></script></body></html>`;
   }
 }
+
 function getNonce() {
   let t = "";
   const p = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  for (let i = 0; i < 32; i++)
+  for (let i = 0; i < 32; i++) {
     t += p.charAt(Math.floor(Math.random() * p.length));
+  }
   return t;
 }

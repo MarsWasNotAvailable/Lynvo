@@ -1,11 +1,17 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "es2022",
     "target": "es2022",
     "moduleResolution": "bundler",
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "outDir": "dist",
-    "lib": ["es2022", "dom", "dom.iterable"],
+    "lib": [
+      "es2022",
+      "dom",
+      "dom.iterable"
+    ],
     "jsx": "react",
     "sourceMap": true,
     "rootDir": "src",
@@ -13,5 +19,10 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "exclude": ["node_modules", ".vscode-test", "dist", "src/test"]
+  "exclude": [
+    "node_modules",
+    ".vscode-test",
+    "dist",
+    "src/test"
+  ]
 }
