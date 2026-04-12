@@ -1,6 +1,7 @@
 // src/providers/LynvoPanel.ts
 import * as vscode from "vscode";
 import { DataManager } from "./DataManager";
+import { GitService } from "./GitService";
 
 export class LynvoPanel {
   public static currentPanel: LynvoPanel | undefined;
@@ -136,6 +137,15 @@ export class LynvoPanel {
             return;
           case "deleteLabel":
             await DataManager.deleteLabel(message.labelId);
+            LynvoPanel.refreshData();
+            return;
+          case "syncBoard":
+            const result = await GitService.syncBoard();
+            if (result.success) {
+              vscode.window.showInformationMessage(result.message);
+            } else {
+              vscode.window.showWarningMessage(result.message);
+            }
             LynvoPanel.refreshData();
             return;
           case "openCode":

@@ -17,9 +17,10 @@ export const App: React.FC = () => {
     "board",
   );
 
-  // Filtros
+  // Filtros y Sincronización
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilterLabel, setActiveFilterLabel] = useState<string>("");
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // --- ESTADOS DE TAREAS ---
   const [addingTaskColId, setAddingTaskColId] = useState<string | null>(null);
@@ -52,12 +53,20 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      if (event.data.command === "loadData") setBoardData(event.data.data);
+      if (event.data.command === "loadData") {
+        setBoardData(event.data.data);
+        setIsSyncing(false);
+      }
     };
     window.addEventListener("message", handleMessage);
     vscode.postMessage({ command: "requestData" });
     return () => window.removeEventListener("message", handleMessage);
   }, []);
+
+  const triggerSync = () => {
+    setIsSyncing(true);
+    vscode.postMessage({ command: "syncBoard" });
+  };
 
   // --- LÓGICA DRAG & DROP ---
   const handleDragStart = (e: React.DragEvent, id: string) => {
@@ -738,6 +747,23 @@ export const App: React.FC = () => {
           >
             Labels
           </button>
+
+          <button
+            onClick={triggerSync}
+            disabled={isSyncing}
+            style={{
+              marginLeft: "10px",
+              padding: "5px 10px",
+              borderRadius: "4px",
+              cursor: isSyncing ? "wait" : "pointer",
+              backgroundColor: "var(--vscode-button-secondaryBackground)",
+              color: "var(--vscode-button-secondaryForeground)",
+              border: "1px solid var(--vscode-widget-border)",
+              fontWeight: "bold",
+            }}
+          >
+            {isSyncing ? "⏳ Syncing..." : "☁️ Sync Team"}
+          </button>
         </div>
 
         {activeView === "board" && (
@@ -808,7 +834,6 @@ export const App: React.FC = () => {
                   boxSizing: "border-box",
                 }}
               >
-                {/* ARREGLO: Los botones de ordenar solo aparecen al dar click en editar la columna (✏️) */}
                 {editingColId === col.id ? (
                   <div
                     style={{

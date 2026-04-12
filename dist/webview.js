@@ -33482,9 +33482,10 @@ const formatDateTime = (timestamp) => {
 const App = () => {
     const [boardData, setBoardData] = (0, react_1.useState)(null);
     const [activeView, setActiveView] = (0, react_1.useState)("board");
-    // Filtros
+    // Filtros y Sincronización
     const [searchTerm, setSearchTerm] = (0, react_1.useState)("");
     const [activeFilterLabel, setActiveFilterLabel] = (0, react_1.useState)("");
+    const [isSyncing, setIsSyncing] = (0, react_1.useState)(false);
     // --- ESTADOS DE TAREAS ---
     const [addingTaskColId, setAddingTaskColId] = (0, react_1.useState)(null);
     const [newTaskTitle, setNewTaskTitle] = (0, react_1.useState)("");
@@ -33509,13 +33510,19 @@ const App = () => {
     const isFiltering = searchTerm.trim().length > 0 || activeFilterLabel !== "";
     (0, react_1.useEffect)(() => {
         const handleMessage = (event) => {
-            if (event.data.command === "loadData")
+            if (event.data.command === "loadData") {
                 setBoardData(event.data.data);
+                setIsSyncing(false);
+            }
         };
         window.addEventListener("message", handleMessage);
         vscode.postMessage({ command: "requestData" });
         return () => window.removeEventListener("message", handleMessage);
     }, []);
+    const triggerSync = () => {
+        setIsSyncing(true);
+        vscode.postMessage({ command: "syncBoard" });
+    };
     // --- LÓGICA DRAG & DROP ---
     const handleDragStart = (e, id) => {
         if (editingTaskId === id || isFiltering) {
@@ -33975,7 +33982,17 @@ const App = () => {
                         padding: "5px 10px",
                         borderRadius: "4px",
                         cursor: "pointer",
-                    } }, "Labels")),
+                    } }, "Labels"),
+                React.createElement("button", { onClick: triggerSync, disabled: isSyncing, style: {
+                        marginLeft: "10px",
+                        padding: "5px 10px",
+                        borderRadius: "4px",
+                        cursor: isSyncing ? "wait" : "pointer",
+                        backgroundColor: "var(--vscode-button-secondaryBackground)",
+                        color: "var(--vscode-button-secondaryForeground)",
+                        border: "1px solid var(--vscode-widget-border)",
+                        fontWeight: "bold",
+                    } }, isSyncing ? "⏳ Syncing..." : "☁️ Sync Team")),
             activeView === "board" && (React.createElement("div", { style: { display: "flex", gap: "10px", alignItems: "center" } },
                 React.createElement("input", { placeholder: "\uD83D\uDD0D Search tasks...", value: searchTerm, onChange: (e) => setSearchTerm(e.target.value), style: { padding: "6px", width: "200px" } }),
                 React.createElement("select", { value: activeFilterLabel, onChange: (e) => setActiveFilterLabel(e.target.value), style: { padding: "6px" } },

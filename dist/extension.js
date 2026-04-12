@@ -47,60 +47,53 @@ exports.activate = activate;
 exports.deactivate = deactivate;
 // src/extension.ts
 const vscode = __importStar(__webpack_require__(/*! vscode */ "vscode"));
-const DataManager_1 = __webpack_require__(/*! ./providers/DataManager */ "./src/providers/DataManager.ts");
 const AuthProvider_1 = __webpack_require__(/*! ./providers/AuthProvider */ "./src/providers/AuthProvider.ts");
 const LynvoPanel_1 = __webpack_require__(/*! ./providers/LynvoPanel */ "./src/providers/LynvoPanel.ts");
-const SidebarProvider_1 = __webpack_require__(/*! ./providers/SidebarProvider */ "./src/providers/SidebarProvider.ts");
-async function activate(context) {
-    console.log('¡La extensión "Lynvo" se ha activado!');
-    await DataManager_1.DataManager.initializeBoard();
-    const sidebarProvider = new SidebarProvider_1.SidebarProvider();
-    vscode.window.registerTreeDataProvider("lynvo.sidebarMenu", sidebarProvider);
-    let testAuthCommand = vscode.commands.registerCommand("lynvo.testAuth", async () => {
-        vscode.window.showInformationMessage("Lynvo: Conectando con GitHub...");
+const DataManager_1 = __webpack_require__(/*! ./providers/DataManager */ "./src/providers/DataManager.ts");
+const LynvoMenuProvider_1 = __webpack_require__(/*! ./providers/LynvoMenuProvider */ "./src/providers/LynvoMenuProvider.ts");
+function activate(context) {
+    // 1. REGISTRAMOS EL MENÚ LATERAL
+    const lynvoMenuProvider = new LynvoMenuProvider_1.LynvoMenuProvider();
+    // Corregido: Ahora coincide exactamente con el ID de tu package.json
+    vscode.window.registerTreeDataProvider("lynvo.sidebarMenu", lynvoMenuProvider);
+    // 2. INICIALIZAMOS LA BASE DE DATOS
+    DataManager_1.DataManager.initializeBoard().catch((err) => console.error("Lynvo Init Error:", err));
+    context.subscriptions.push(vscode.commands.registerCommand("lynvo.testAuth", async () => {
         const user = await AuthProvider_1.AuthProvider.getGitHubUser();
         if (user) {
-            vscode.window.showInformationMessage(`¡Hola ${user.username}!`);
+            vscode.window.showInformationMessage(`Conectado como: ${user.username}`);
         }
-    });
-    let openBoardCommand = vscode.commands.registerCommand("lynvo.openBoard", () => {
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand("lynvo.openBoard", () => {
         LynvoPanel_1.LynvoPanel.render(context.extensionUri);
-    });
-    // NUEVO: Comando para crear tareas seleccionando código
-    let createFromCodeCommand = vscode.commands.registerCommand("lynvo.createTaskFromCode", async () => {
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand("lynvo.createTaskFromCode", async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
-            vscode.window.showWarningMessage("No hay ningún archivo abierto para vincular.");
+            vscode.window.showErrorMessage("No hay ningún archivo abierto.");
             return;
         }
         const selection = editor.selection;
         const text = editor.document.getText(selection);
-        // Pedimos al usuario el título de la tarea
-        const title = await vscode.window.showInputBox({
-            prompt: "Título para la tarea de Lynvo",
-            placeHolder: "Ej: Refactorizar esta función",
-        });
-        if (!title)
-            return; // Si pulsa Escape, cancelamos
-        // Calculamos la ruta del archivo relativa al proyecto
-        const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
-        const filePath = workspaceFolder
-            ? vscode.workspace.asRelativePath(editor.document.uri)
-            : editor.document.uri.fsPath;
+        if (!text) {
+            vscode.window.showErrorMessage("Selecciona un fragmento de código primero.");
+            return;
+        }
+        const filePath = vscode.workspace.asRelativePath(editor.document.uri);
         const codeRef = {
             filePath: filePath,
-            lineStart: selection.start.line + 1, // Sumamos 1 porque las líneas empiezan en 0 en la API
-            lineEnd: selection.end.line + 1,
+            lineStart: selection.start.line + 1,
         };
-        const description = text.length > 0
-            ? `Código vinculado:\n${text}`
-            : "Tarea creada desde un archivo.";
-        // Creamos la tarea y forzamos la actualización de la interfaz visual
-        await DataManager_1.DataManager.createTask(title, description, codeRef);
-        await LynvoPanel_1.LynvoPanel.refreshData();
-        vscode.window.showInformationMessage("¡Tarea vinculada a Lynvo con éxito!");
-    });
-    context.subscriptions.push(testAuthCommand, openBoardCommand, createFromCodeCommand);
+        const title = await vscode.window.showInputBox({
+            prompt: "Título de la tarea",
+        });
+        if (!title)
+            return;
+        // Usamos el DataManager que ya tienes, que está perfecto
+        await DataManager_1.DataManager.createTask(title, text, undefined, [], codeRef);
+        vscode.window.showInformationMessage("Tarea creada en Lynvo.");
+        LynvoPanel_1.LynvoPanel.refreshData();
+    }));
 }
 function deactivate() { }
 
@@ -375,9 +368,9 @@ class DataManager {
             lastModifiedBy: user || { githubId: "unknown", username: "Unknown" },
             createdAt: Date.now(),
             updatedAt: Date.now(),
-            codeReference,
+            codeReference: codeReference,
             position: Date.now(),
-            labelIds: labelIds,
+            labelIds: labelIds || [],
         };
         await this.saveBoard(board);
     }
@@ -469,6 +462,224 @@ exports.DataManager = DataManager;
 
 /***/ },
 
+/***/ "./src/providers/GitService.ts"
+/*!*************************************!*\
+  !*** ./src/providers/GitService.ts ***!
+  \*************************************/
+(__unused_webpack_module, exports, __webpack_require__) {
+
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.GitService = void 0;
+// src/providers/GitService.ts
+const vscode = __importStar(__webpack_require__(/*! vscode */ "vscode"));
+const cp = __importStar(__webpack_require__(/*! child_process */ "child_process"));
+const DataManager_1 = __webpack_require__(/*! ./DataManager */ "./src/providers/DataManager.ts");
+class GitService {
+    static getWorkspacePath() {
+        const folders = vscode.workspace.workspaceFolders;
+        return folders && folders.length > 0 ? folders[0].uri.fsPath : null;
+    }
+    static execPromise(command, cwd) {
+        return new Promise((resolve, reject) => {
+            cp.exec(command, { cwd }, (error, stdout, stderr) => {
+                if (error) {
+                    console.warn(`Lynvo Git Warn: ${stderr}`);
+                    reject(error);
+                }
+                else {
+                    resolve(stdout.trim());
+                }
+            });
+        });
+    }
+    static async syncBoard() {
+        const cwd = this.getWorkspacePath();
+        if (!cwd)
+            return { success: false, message: "No se encontró el workspace." };
+        try {
+            // 1. Descargamos la info de la nube de forma invisible
+            await this.execPromise("git fetch origin", cwd);
+            const branch = await this.execPromise("git rev-parse --abbrev-ref HEAD", cwd);
+            // 2. Extraemos el tablero remoto directamente de la memoria de Git
+            let remoteBoardStr = "";
+            try {
+                remoteBoardStr = await this.execPromise(`git show origin/${branch}:.vscode/lynvo.json`, cwd);
+            }
+            catch (e) {
+                // Es normal si el archivo aún no existe en el repositorio remoto
+            }
+            const localBoard = await DataManager_1.DataManager.loadBoard();
+            if (!localBoard)
+                return {
+                    success: false,
+                    message: "No hay tablero local que sincronizar.",
+                };
+            // 3. FUSIÓN MATEMÁTICA INTELIGENTE (Anti-Pérdida de Datos)
+            if (remoteBoardStr) {
+                const remoteBoard = JSON.parse(remoteBoardStr);
+                const mergedTasks = { ...remoteBoard.tasks };
+                for (const taskId in localBoard.tasks) {
+                    const localTask = localBoard.tasks[taskId];
+                    const remoteTask = mergedTasks[taskId];
+                    // Regla de oro: Gana la tarea que se haya modificado más recientemente
+                    if (!remoteTask || localTask.updatedAt >= remoteTask.updatedAt) {
+                        mergedTasks[taskId] = localTask;
+                    }
+                }
+                // Mezclamos la estructura (columnas y etiquetas)
+                localBoard.tasks = mergedTasks;
+                localBoard.columns = { ...remoteBoard.columns, ...localBoard.columns };
+                if (remoteBoard.labels) {
+                    localBoard.labels = {
+                        ...remoteBoard.labels,
+                        ...(localBoard.labels || {}),
+                    };
+                }
+                await DataManager_1.DataManager.saveBoard(localBoard);
+            }
+            // 4. Aseguramos la fusión perfecta creando un commit local
+            await this.execPromise("git add .vscode/lynvo.json", cwd);
+            const status = await this.execPromise("git status --porcelain .vscode/lynvo.json", cwd);
+            if (status) {
+                await this.execPromise('git commit -m "(Lynvo): auto-merge team board [skip ci]"', cwd);
+            }
+            // 5. Unimos los historiales. Si Git detecta conflicto de texto, le obligamos a usar nuestra fusión (-X ours)
+            try {
+                await this.execPromise(`git merge origin/${branch} -X ours -m "(Lynvo): integrate remote changes"`, cwd);
+            }
+            catch (mergeErr) {
+                await this.execPromise("git merge --abort", cwd).catch(() => { });
+                return {
+                    success: false,
+                    message: "Hay conflictos en el código de tu proyecto que bloquean la sincronización de Lynvo. Haz commit o pull de tus archivos primero.",
+                };
+            }
+            // 6. Subimos todo a GitHub
+            await this.execPromise(`git push origin ${branch}`, cwd);
+            return {
+                success: true,
+                message: "¡Sincronización Total! Datos fusionados inteligentemente y subidos a GitHub.",
+            };
+        }
+        catch (error) {
+            console.error("Lynvo Git Error:", error);
+            return {
+                success: false,
+                message: "Error al hacer push. Revisa tu consola de Git.",
+            };
+        }
+    }
+}
+exports.GitService = GitService;
+
+
+/***/ },
+
+/***/ "./src/providers/LynvoMenuProvider.ts"
+/*!********************************************!*\
+  !*** ./src/providers/LynvoMenuProvider.ts ***!
+  \********************************************/
+(__unused_webpack_module, exports, __webpack_require__) {
+
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.LynvoMenuProvider = void 0;
+// src/providers/LynvoMenuProvider.ts
+const vscode = __importStar(__webpack_require__(/*! vscode */ "vscode"));
+class LynvoMenuProvider {
+    getTreeItem(element) {
+        return element;
+    }
+    getChildren(element) {
+        if (element) {
+            return Promise.resolve([]);
+        }
+        else {
+            return Promise.resolve([
+                this.createMenuItem("🚀 Open Board", "lynvo.openBoard", "Abre el tablero principal de Kanban"),
+                this.createMenuItem("➕ Add Task from Code", "lynvo.createTaskFromCode", "Crea una tarea a partir de tu selección actual"),
+            ]);
+        }
+    }
+    createMenuItem(label, command, tooltip) {
+        const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+        item.command = { command: command, title: label };
+        item.tooltip = tooltip;
+        return item;
+    }
+}
+exports.LynvoMenuProvider = LynvoMenuProvider;
+
+
+/***/ },
+
 /***/ "./src/providers/LynvoPanel.ts"
 /*!*************************************!*\
   !*** ./src/providers/LynvoPanel.ts ***!
@@ -514,6 +725,7 @@ exports.LynvoPanel = void 0;
 // src/providers/LynvoPanel.ts
 const vscode = __importStar(__webpack_require__(/*! vscode */ "vscode"));
 const DataManager_1 = __webpack_require__(/*! ./DataManager */ "./src/providers/DataManager.ts");
+const GitService_1 = __webpack_require__(/*! ./GitService */ "./src/providers/GitService.ts");
 class LynvoPanel {
     static currentPanel;
     _panel;
@@ -612,6 +824,16 @@ class LynvoPanel {
                     await DataManager_1.DataManager.deleteLabel(message.labelId);
                     LynvoPanel.refreshData();
                     return;
+                case "syncBoard":
+                    const result = await GitService_1.GitService.syncBoard();
+                    if (result.success) {
+                        vscode.window.showInformationMessage(result.message);
+                    }
+                    else {
+                        vscode.window.showWarningMessage(result.message);
+                    }
+                    LynvoPanel.refreshData();
+                    return;
                 case "openCode":
                     const folders = vscode.workspace.workspaceFolders;
                     if (folders) {
@@ -653,79 +875,6 @@ function getNonce() {
 
 /***/ },
 
-/***/ "./src/providers/SidebarProvider.ts"
-/*!******************************************!*\
-  !*** ./src/providers/SidebarProvider.ts ***!
-  \******************************************/
-(__unused_webpack_module, exports, __webpack_require__) {
-
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.SidebarProvider = void 0;
-// src/providers/SidebarProvider.ts
-const vscode = __importStar(__webpack_require__(/*! vscode */ "vscode"));
-// Creamos un proveedor de datos para una vista de árbol (TreeView) nativa de VS Code
-class SidebarProvider {
-    getTreeItem(element) {
-        return element;
-    }
-    getChildren() {
-        // Opción 1: Botón para abrir el tablero
-        const openBoardItem = new vscode.TreeItem("🚀 Abrir Tablero Lynvo", vscode.TreeItemCollapsibleState.None);
-        openBoardItem.tooltip = "Abre el panel Kanban en pantalla completa";
-        openBoardItem.command = {
-            command: "lynvo.openBoard",
-            title: "Abrir Tablero",
-        };
-        // Opción 2: Botón para probar la conexión
-        const authItem = new vscode.TreeItem("🔐 Conectar GitHub", vscode.TreeItemCollapsibleState.None);
-        authItem.tooltip = "Verifica tu identidad en GitHub";
-        authItem.command = {
-            command: "lynvo.testAuth",
-            title: "Conectar GitHub",
-        };
-        // Devolvemos los botones que aparecerán en la barra lateral
-        return [openBoardItem, authItem];
-    }
-}
-exports.SidebarProvider = SidebarProvider;
-
-
-/***/ },
-
 /***/ "vscode"
 /*!*************************!*\
   !*** external "vscode" ***!
@@ -733,6 +882,16 @@ exports.SidebarProvider = SidebarProvider;
 (module) {
 
 module.exports = require("vscode");
+
+/***/ },
+
+/***/ "child_process"
+/*!********************************!*\
+  !*** external "child_process" ***!
+  \********************************/
+(module) {
+
+module.exports = require("child_process");
 
 /***/ }
 

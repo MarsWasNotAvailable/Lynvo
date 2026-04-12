@@ -147,7 +147,7 @@ export class DataManager {
     description: string,
     targetColId?: string,
     labelIds: string[] = [],
-    codeReference?: CodeReference,
+    codeReference?: any,
   ): Promise<void> {
     const board = await this.loadBoard();
     if (!board) return;
@@ -171,9 +171,9 @@ export class DataManager {
       lastModifiedBy: user || { githubId: "unknown", username: "Unknown" },
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      codeReference,
+      codeReference: codeReference,
       position: Date.now(),
-      labelIds: labelIds,
+      labelIds: labelIds || [],
     };
     await this.saveBoard(board);
   }
