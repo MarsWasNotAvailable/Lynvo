@@ -1,12 +1,6 @@
 // src/providers/DataManager.ts
 import * as vscode from "vscode";
-import {
-  LynvoBoard,
-  LynvoTask,
-  CodeReference,
-  LynvoColumn,
-  LynvoLabel,
-} from "../types";
+import { LynvoBoard } from "../types";
 import { AuthProvider } from "./AuthProvider";
 
 export class DataManager {
@@ -108,6 +102,7 @@ export class DataManager {
   public static async saveBoard(board: LynvoBoard): Promise<void> {
     const fileUri = this.getFileUri();
     if (!fileUri) return;
+    await this.ensureStorageFolderExists();
     const data = Buffer.from(JSON.stringify(board, null, 2), "utf8");
     await vscode.workspace.fs.writeFile(fileUri, data);
   }
@@ -125,7 +120,14 @@ export class DataManager {
     await this.saveBoard(board);
   }
 
-  public static async reorderTasks(updates: any[]): Promise<void> {
+  public static async reorderTasks(
+    updates: {
+      id: string;
+      status: string;
+      position: number;
+      isDraggedTask?: boolean;
+    }[],
+  ): Promise<void> {
     const board = await this.loadBoard();
     if (!board) return;
     const user = await AuthProvider.getGitHubUser();
@@ -147,7 +149,8 @@ export class DataManager {
     description: string,
     targetColId?: string,
     labelIds: string[] = [],
-    codeReference?: any,
+    codeReference?: { filePath: string; lineStart: number; lineEnd?: number },
+    priority: "low" | "medium" | "high" = "medium",
   ): Promise<void> {
     const board = await this.loadBoard();
     if (!board) return;
@@ -174,6 +177,7 @@ export class DataManager {
       codeReference: codeReference,
       position: Date.now(),
       labelIds: labelIds || [],
+      priority,
     };
     await this.saveBoard(board);
   }
@@ -183,6 +187,7 @@ export class DataManager {
     title: string,
     description: string,
     labelIds: string[] = [],
+    priority: "low" | "medium" | "high" = "medium",
   ): Promise<void> {
     const board = await this.loadBoard();
     if (!board || !board.tasks[taskId]) return;
@@ -190,6 +195,7 @@ export class DataManager {
     board.tasks[taskId].title = title;
     board.tasks[taskId].description = description;
     board.tasks[taskId].labelIds = labelIds;
+    board.tasks[taskId].priority = priority;
     board.tasks[taskId].updatedAt = Date.now();
     if (user) board.tasks[taskId].lastModifiedBy = user;
     await this.saveBoard(board);
@@ -272,5 +278,16 @@ export class DataManager {
       }
     }
     await this.saveBoard(board);
+  }
+
+  private static async ensureStorageFolderExists(): Promise<void> {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) return;
+    const folderUri = vscode.Uri.joinPath(workspaceFolders[0].uri, this.FOLDER);
+    try {
+      await vscode.workspace.fs.stat(folderUri);
+    } catch {
+      await vscode.workspace.fs.createDirectory(folderUri);
+    }
   }
 }

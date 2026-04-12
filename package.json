@@ -25,6 +25,22 @@
         "title": "Lynvo: Open Project Board"
       },
       {
+        "command": "lynvo.openInsights",
+        "title": "Lynvo: Open Insights"
+      },
+      {
+        "command": "lynvo.openLabels",
+        "title": "Lynvo: Manage Labels"
+      },
+      {
+        "command": "lynvo.syncBoard",
+        "title": "Lynvo: Sync Board with GitHub"
+      },
+      {
+        "command": "lynvo.createTaskQuick",
+        "title": "Lynvo: Create Quick Task"
+      },
+      {
         "command": "lynvo.createTaskFromCode",
         "title": "Lynvo: Crear Tarea desde Selección"
       }

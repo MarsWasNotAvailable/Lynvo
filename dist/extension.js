@@ -67,6 +67,36 @@ function activate(context) {
     context.subscriptions.push(vscode.commands.registerCommand("lynvo.openBoard", () => {
         LynvoPanel_1.LynvoPanel.render(context.extensionUri);
     }));
+    context.subscriptions.push(vscode.commands.registerCommand("lynvo.openInsights", () => {
+        LynvoPanel_1.LynvoPanel.render(context.extensionUri);
+        LynvoPanel_1.LynvoPanel.setActiveView("insights");
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand("lynvo.openLabels", () => {
+        LynvoPanel_1.LynvoPanel.render(context.extensionUri);
+        LynvoPanel_1.LynvoPanel.setActiveView("labels");
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand("lynvo.syncBoard", async () => {
+        const result = await LynvoPanel_1.LynvoPanel.syncBoard();
+        if (result.success) {
+            vscode.window.showInformationMessage(result.message);
+        }
+        else {
+            vscode.window.showWarningMessage(result.message);
+        }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand("lynvo.createTaskQuick", async () => {
+        const title = await vscode.window.showInputBox({
+            prompt: "Título de la tarea",
+        });
+        if (!title?.trim())
+            return;
+        const description = await vscode.window.showInputBox({
+            prompt: "Descripción (opcional)",
+        });
+        await DataManager_1.DataManager.createTask(title.trim(), description?.trim() || "");
+        vscode.window.showInformationMessage("Tarea creada en Lynvo.");
+        LynvoPanel_1.LynvoPanel.refreshData();
+    }));
     context.subscriptions.push(vscode.commands.registerCommand("lynvo.createTaskFromCode", async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
@@ -83,6 +113,7 @@ function activate(context) {
         const codeRef = {
             filePath: filePath,
             lineStart: selection.start.line + 1,
+            lineEnd: selection.end.line + 1,
         };
         const title = await vscode.window.showInputBox({
             prompt: "Título de la tarea",
@@ -90,7 +121,7 @@ function activate(context) {
         if (!title)
             return;
         // Usamos el DataManager que ya tienes, que está perfecto
-        await DataManager_1.DataManager.createTask(title, text, undefined, [], codeRef);
+        await DataManager_1.DataManager.createTask(title, text, undefined, [], codeRef, "high");
         vscode.window.showInformationMessage("Tarea creada en Lynvo.");
         LynvoPanel_1.LynvoPanel.refreshData();
     }));
@@ -316,6 +347,7 @@ class DataManager {
         const fileUri = this.getFileUri();
         if (!fileUri)
             return;
+        await this.ensureStorageFolderExists();
         const data = Buffer.from(JSON.stringify(board, null, 2), "utf8");
         await vscode.workspace.fs.writeFile(fileUri, data);
     }
@@ -348,7 +380,7 @@ class DataManager {
         });
         await this.saveBoard(board);
     }
-    static async createTask(title, description, targetColId, labelIds = [], codeReference) {
+    static async createTask(title, description, targetColId, labelIds = [], codeReference, priority = "medium") {
         const board = await this.loadBoard();
         if (!board)
             return;
@@ -371,10 +403,11 @@ class DataManager {
             codeReference: codeReference,
             position: Date.now(),
             labelIds: labelIds || [],
+            priority,
         };
         await this.saveBoard(board);
     }
-    static async editTask(taskId, title, description, labelIds = []) {
+    static async editTask(taskId, title, description, labelIds = [], priority = "medium") {
         const board = await this.loadBoard();
         if (!board || !board.tasks[taskId])
             return;
@@ -382,6 +415,7 @@ class DataManager {
         board.tasks[taskId].title = title;
         board.tasks[taskId].description = description;
         board.tasks[taskId].labelIds = labelIds;
+        board.tasks[taskId].priority = priority;
         board.tasks[taskId].updatedAt = Date.now();
         if (user)
             board.tasks[taskId].lastModifiedBy = user;
@@ -455,6 +489,18 @@ class DataManager {
             }
         }
         await this.saveBoard(board);
+    }
+    static async ensureStorageFolderExists() {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0)
+            return;
+        const folderUri = vscode.Uri.joinPath(workspaceFolders[0].uri, this.FOLDER);
+        try {
+            await vscode.workspace.fs.stat(folderUri);
+        }
+        catch {
+            await vscode.workspace.fs.createDirectory(folderUri);
+        }
     }
 }
 exports.DataManager = DataManager;
@@ -664,7 +710,12 @@ class LynvoMenuProvider {
         else {
             return Promise.resolve([
                 this.createMenuItem("🚀 Open Board", "lynvo.openBoard", "Abre el tablero principal de Kanban"),
-                this.createMenuItem("➕ Add Task from Code", "lynvo.createTaskFromCode", "Crea una tarea a partir de tu selección actual"),
+                this.createMenuItem("📊 Open Insights", "lynvo.openInsights", "Visualiza métricas y estado del proyecto"),
+                this.createMenuItem("🏷️ Manage Labels", "lynvo.openLabels", "Gestiona etiquetas del tablero"),
+                this.createMenuItem("☁️ Sync with GitHub", "lynvo.syncBoard", "Fusiona y sincroniza el tablero de equipo"),
+                this.createMenuItem("➕ Add Task", "lynvo.createTaskQuick", "Crea una tarea rápida desde comandos de Lynvo"),
+                this.createMenuItem("🧩 Add Task from Code", "lynvo.createTaskFromCode", "Crea una tarea a partir de tu selección actual"),
+                this.createMenuItem("🔐 Connect GitHub", "lynvo.testAuth", "Verifica la identidad de GitHub en VS Code"),
             ]);
         }
     }
@@ -728,6 +779,7 @@ const DataManager_1 = __webpack_require__(/*! ./DataManager */ "./src/providers/
 const GitService_1 = __webpack_require__(/*! ./GitService */ "./src/providers/GitService.ts");
 class LynvoPanel {
     static currentPanel;
+    static pendingView = null;
     _panel;
     _disposables = [];
     constructor(panel, extensionUri) {
@@ -757,6 +809,20 @@ class LynvoPanel {
             });
         }
     }
+    static setActiveView(view) {
+        LynvoPanel.pendingView = view;
+        if (LynvoPanel.currentPanel) {
+            LynvoPanel.currentPanel._panel.webview.postMessage({
+                command: "setView",
+                view,
+            });
+        }
+    }
+    static async syncBoard() {
+        const result = await GitService_1.GitService.syncBoard();
+        await LynvoPanel.refreshData();
+        return result;
+    }
     dispose() {
         LynvoPanel.currentPanel = undefined;
         this._panel.dispose();
@@ -773,6 +839,12 @@ class LynvoPanel {
                 case "requestData":
                     const board = await DataManager_1.DataManager.loadBoard();
                     webview.postMessage({ command: "loadData", data: board });
+                    if (LynvoPanel.pendingView) {
+                        webview.postMessage({
+                            command: "setView",
+                            view: LynvoPanel.pendingView,
+                        });
+                    }
                     return;
                 case "updateTaskStatus":
                     await DataManager_1.DataManager.updateTaskStatus(message.taskId, message.newStatus);
@@ -783,11 +855,11 @@ class LynvoPanel {
                     LynvoPanel.refreshData();
                     return;
                 case "createTask":
-                    await DataManager_1.DataManager.createTask(message.title, message.description, message.targetColId, message.labelIds);
+                    await DataManager_1.DataManager.createTask(message.title, message.description, message.targetColId, message.labelIds, undefined, message.priority);
                     LynvoPanel.refreshData();
                     return;
                 case "editTask":
-                    await DataManager_1.DataManager.editTask(message.taskId, message.title, message.description, message.labelIds);
+                    await DataManager_1.DataManager.editTask(message.taskId, message.title, message.description, message.labelIds, message.priority);
                     LynvoPanel.refreshData();
                     return;
                 case "deleteTask":
@@ -825,14 +897,13 @@ class LynvoPanel {
                     LynvoPanel.refreshData();
                     return;
                 case "syncBoard":
-                    const result = await GitService_1.GitService.syncBoard();
+                    const result = await LynvoPanel.syncBoard();
                     if (result.success) {
                         vscode.window.showInformationMessage(result.message);
                     }
                     else {
                         vscode.window.showWarningMessage(result.message);
                     }
-                    LynvoPanel.refreshData();
                     return;
                 case "openCode":
                     const folders = vscode.workspace.workspaceFolders;
