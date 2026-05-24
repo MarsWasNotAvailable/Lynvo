@@ -1,98 +1,119 @@
-# Lynvo - Project Board
+# Lynvo — Project Board 🗂️
 
-Lynvo turns VS Code into a local-first project board for engineering teams. It combines a Kanban workflow, code-linked tasks, GitHub-backed collaboration, and project views directly inside the editor.
+**Lynvo** turns VS Code into a local-first Kanban board for engineering teams. It combines drag-and-drop project management, code-linked tasks, Git-backed collaboration, and AI agent integration — all inside your editor.
 
-![Lynvo board preview](media/lynvo-board-preview.png)
+Unlike other project management tools, **your data stays in your workspace**. No servers, no sign-ups, no vendor lock-in.
 
-## Key Features
+---
 
-- **Kanban board:** Dynamic columns, drag and drop, priorities, due dates, labels, filters, and search.
-- **Table view:** Jira-style task overview for scanning status, priority, labels, due dates, and linked code.
-- **Code-linked tasks:** Create tasks from selected code and jump back to the exact file and lines from the board.
-- **Checklists and task relations:** Break down work into checklist items and connect tasks as related, blocking, blocked by, or duplicates.
-- **Activity feed:** Track board changes, task edits, checklist updates, relation changes, and deletes.
-- **Markdown descriptions:** Supports lists, checklists, links, quotes, inline code, and fenced code blocks.
-- **Conflict center:** Review basic sync conflicts and choose the local or remote value.
-- **Local-first persistence:** Project data lives in `.vscode/lynvo/` using modular JSON files by entity.
-- **Shadow Branch Sync:** Automatic GitHub sync writes technical commits only to the internal `lynvo-sync` branch, keeping `main`, `develop`, and feature branches clean.
-- **Presence indicators:** Shows recently active collaborators based on local sync metadata.
+## ✨ Key Features
 
-## Data Model
+### 1. 🎯 Full Kanban Workflow
 
-Lynvo stores board data in a modular project folder:
+Manage your entire project without leaving VS Code:
 
-```text
-.vscode/lynvo/
-  board.json
-  columns.json
-  users.json
-  settings.json
-  tasks/
-    task-id.json
-  activity/
-    activity-id.json
-  metadata/
-    sync.json
-    tombstones.json
-    conflicts.json
-    version.json
-```
+- **Dynamic columns** with drag-and-drop reordering
+- **Priorities** (high / medium / low) with color-coded badges
+- **Labels** — create, edit, and filter by custom tags
+- **Due dates** with automatic overdue / soon / future state indicators
+- **Checklists** inside tasks with real-time toggling
+- **Task relations** — link tasks as related, blocking, blocked by, or duplicates
+- **Markdown descriptions** with full syntax support (lists, code blocks, links, quotes)
 
-Existing projects using `.vscode/lynvo.json` are migrated automatically the first time Lynvo loads the board.
+### 2. 📊 Multiple Project Views
 
-## Team Sync
+Six interconnected views to match how you work:
 
-Lynvo syncs through Git and the repository remote named `origin`.
+- **Board** — Classic Kanban with inline editing, search, and filters
+- **Table** — Spreadsheet-like overview with sortable columns and a node-graph map mode
+- **Activity** — Chronological feed of every board change
+- **Insights** — Project metrics: total tasks, completion rate, overdue, stale, and in-progress counts
+- **Conflicts** — Visual diff resolution for sync field conflicts
+- **Labels** — Centralized label creation and deletion
 
-- Automatic commits are isolated in the internal `lynvo-sync` branch.
-- The active user branch is not checked out, amended, or polluted with technical commits.
-- Local board changes are debounced before sync to reduce unnecessary Git operations.
-- Offline or failed pushes keep changes locally and retry on the next sync.
-- Deletes are tracked with tombstones to reduce task resurrection during merges.
-- Basic field conflicts are surfaced in the Conflict Center.
+### 3. 🤖 AI Agent Integration
 
-## Getting Started
+Lynvo is designed to work **with AI coding agents** (OpenCode, Claude Code, Cline, Cursor, and others). When Lynvo is installed, agents can read, create, and update tasks autonomously:
 
-1. Open a workspace that is already a Git repository.
-2. Configure a remote named `origin` if you want team sync.
-3. Run `Lynvo: Open Project Board` from the command palette or open Lynvo from the Activity Bar.
-4. Create columns, labels, and tasks from the board or from selected code.
-5. Use `Lynvo: Sync Team Board` to trigger sync manually; Lynvo also performs background sync.
+- **Planning-first workflow** — Agents create a parent task with a checklist before starting multi-step work, then mark items complete as they progress
+- **Direct JSON access** — Board data is stored as individual JSON files in `.vscode/lynvo/`, so agents can operate on tasks without any API
+- **Real-time visibility** — Checklist toggles, status moves, and activity entries are written by agents in real time, visible instantly on the board
+- **Autonomous task management** — Agents can create implementation tasks with labels, priorities, due dates, code references, and relations
+- **File watcher** — Any direct file edit by an agent is picked up by the extension within ~250ms and the webview refreshes automatically
+- **SKILL.md included** — A complete agent integration skill is bundled with the extension, providing full type definitions, ID generation, and workflow guidance
 
-## Commands
+> **Note for AI agents:** If Lynvo is installed in the workspace, check for `.vscode/lynvo/` and use the SKILL.md instructions to manage tasks on the board.
 
-| Command | Description |
-| :-- | :-- |
-| `Lynvo: Open Project Board` | Opens the Kanban board. |
-| `Lynvo: Open Table View` | Opens the table view. |
-| `Lynvo: Open Activity Feed` | Opens the activity feed. |
-| `Lynvo: Open Conflict Center` | Opens sync conflict resolution. |
-| `Lynvo: Open Labels Manager` | Opens label management. |
-| `Lynvo: Open Insights View` | Opens project analytics. |
-| `Lynvo: Quick Create Task` | Creates a task from VS Code without opening the board first. |
-| `Lynvo: Create Task from Selection` | Creates a task linked to selected code. |
-| `Lynvo: Sync Team Board` | Runs a manual shadow-branch sync. |
-| `Lynvo: Connect GitHub` | Stores the current GitHub identity for task authorship and presence. |
+### 4. 👨‍👩‍👧‍👦 Team Sync via Git
 
-## Requirements
+Collaborate without a central server:
 
-- Visual Studio Code 1.80.0 or newer.
-- Git installed locally.
-- A repository remote named `origin` for GitHub-backed collaboration.
+- **Shadow branch pattern** — All sync happens on a dedicated `lynvo-sync` branch, never touching `main` or feature branches
+- **Automatic sync** — Background sync every 120 seconds, plus a 15-second debounce after changes
+- **Conflict resolution** — Field-level conflicts are detected and surfaced in the Conflict Center UI
+- **Tombstone tracking** — Deleted entities are tracked to prevent resurrection during merges
+- **Presence indicators** — See who else is working on the board based on sync metadata
+- **Manual sync** — Trigger on demand with `Lynvo: Sync Team Board`
 
-## Privacy
+### 5. 🔒 Local-First & Private
 
-Lynvo has no external application server. Board data is stored in the current workspace and synchronized through your Git remote when sync is enabled.
+- **Zero external servers** — All data lives in `.vscode/lynvo/` inside your workspace
+- **Modular JSON files** — Tasks, columns, labels, activity, and metadata are stored as separate files for easy inspection and direct editing
+- **Atomic writes & corruption recovery** — Files are written to temp files first, then renamed; corrupt files are backed up automatically
+- **Offline-first** — Work without internet; changes sync when the remote is reachable again
 
-## Development
+### 6. 🔗 Code-Integrated Tasks
 
-```bash
-npm install
-npm run compile
-npm run package
-npm run compile-tests
-```
+- **Create tasks from code** — Select code in the editor and run `Lynvo: Create Task from Selection` to capture the exact file and line range
+- **Code references on cards** — Every task shows linked file paths with one-click navigation back to the source
+- **Open code from the board** — Click any code reference to jump directly to the file and line
 
-## License
+---
 
-MIT
+## 🚀 How to Use
+
+Once installed, Lynvo appears in the Activity Bar. Open the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`) and use any of these commands:
+
+| Command                             | Description                                             |
+| :---------------------------------- | :------------------------------------------------------ |
+| `Lynvo: Open Project Board`         | Opens the Kanban board                                  |
+| `Lynvo: Open Table View`            | Opens the table / map view                              |
+| `Lynvo: Open Activity Feed`         | Opens the chronological activity feed                   |
+| `Lynvo: Open Conflict Center`       | Opens sync conflict resolution                          |
+| `Lynvo: Open Labels Manager`        | Opens label management                                  |
+| `Lynvo: Open Insights View`         | Opens project analytics                                 |
+| `Lynvo: Quick Create Task`          | Creates a task without opening the board                |
+| `Lynvo: Create Task from Selection` | Creates a task linked to selected code                  |
+| `Lynvo: Sync Team Board`            | Runs a manual shadow-branch sync                        |
+| `Lynvo: Connect GitHub`             | Stores your GitHub identity for authorship and presence |
+
+---
+
+## 📸 Screenshots
+
+_Board View_
+![Board View](media/Lynvo-general.png)
+
+_Table View_
+![Table View](media/Lynvo-table.png)
+
+---
+
+## 🛡️ Privacy Policy
+
+Your data is yours.
+
+- **No Telemetry:** Lynvo does **NOT** send any data to external servers.
+- **Local Storage:** All board data is stored as JSON files in `.vscode/lynvo/` within your workspace.
+- **Git Sync:** If you enable team sync, data is pushed to your configured Git remote, but Lynvo has no application backend.
+- **No Account Required:** You can use the full board without any authentication; GitHub identity is optional and used only for authorship attribution.
+
+---
+
+## 📝 License
+
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+**Happy building!** 🚀

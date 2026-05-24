@@ -71,6 +71,12 @@ export class LynvoMenuProvider
       tooltip: "Conecta y valida tu identidad de GitHub",
       icon: "github",
     },
+    {
+      label: "Install Agent Skills",
+      command: "lynvo.installSkills",
+      tooltip: "Instala la skill de Lynvo en OpenCode, Claude Code, Cline, Cursor y otros agentes de IA",
+      icon: "robot",
+    },
   ];
 
   getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
