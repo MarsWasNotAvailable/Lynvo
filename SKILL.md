@@ -256,7 +256,7 @@ When creating or modifying tasks without GitHub authentication, use this identit
 { "githubId": "unknown", "username": "Lynvo - Agent" }
 ```
 
-This is the convention used by the extension for unauthenticated automated operations.
+This is the direct-agent attribution convention. Extension-created unauthenticated changes may use `{ "githubId": "unknown", "username": "Unknown" }`, but AI agents should prefer `Lynvo - Agent` so their direct JSON edits are recognizable.
 
 ## Field Defaults (Board Integrity)
 
@@ -291,6 +291,7 @@ If a task's `status` references a deleted column, it is reassigned to the leftmo
 | `lynvo.openInsights` | Open the insights/metrics webview |
 | `lynvo.syncBoard` | Trigger manual shadow-branch sync |
 | `lynvo.connectGitHub` | Authenticate with GitHub for user identity |
+| `lynvo.installSkills` | Reinstall bundled Lynvo agent skills into supported agent locations |
 
 ### Option B: Direct JSON File Manipulation
 
@@ -363,6 +364,41 @@ Write to `.vscode/lynvo/activity/{activityId}.json`:
 }
 ```
 
+#### Step 4: Mark sync pending
+
+After every direct JSON mutation, update `.vscode/lynvo/metadata/sync.json` while preserving any existing `lastSyncAt` and `lastRemoteCommit` values:
+
+```json
+{
+  "branch": "lynvo-sync",
+  "status": "pending",
+  "pendingChanges": true,
+  "lastSyncAt": null,
+  "lastRemoteCommit": null,
+  "message": "Local changes pending sync",
+  "updatedAt": 1716300000000
+}
+```
+
+### Direct JSON Operation Recipes
+
+When VS Code commands are unavailable, follow these recipes exactly. Always read the current board files first, preserve unrelated fields, write an activity entry for every meaningful mutation, and mark sync pending afterward.
+
+| Operation | Required direct edits |
+|---|---|
+| Move task | Update `tasks/{taskId}.json`: set `status` to an existing column id, update `position` if reordering, set `updatedAt`, set `lastModifiedBy`. Add `task_moved` activity with `metadata.from` and `metadata.to`. |
+| Reorder tasks | Update each affected task's `position`; update `updatedAt` and activity only for the dragged/primary task. Use numeric positions sorted within the destination column. |
+| Edit task | Update `title`, `description`, `labelIds`, `priority`, `dueDate`, `updatedAt`, and `lastModifiedBy`. Add `task_updated` activity. |
+| Delete task | Delete `tasks/{taskId}.json`, add `metadata/tombstones.json` entry `task-{taskId}`, remove relations in other tasks that target the deleted task, and add `task_deleted` activity. |
+| Add checklist item | Append a `LynvoChecklistItem` to `checklist`, update task timestamps/actor, and add `checklist_added` activity. |
+| Update checklist item | Modify only `text` and/or `done`, update item and task timestamps/actor, and add `checklist_updated` activity. |
+| Delete checklist item | Remove the checklist item, update task timestamps/actor, and add `checklist_deleted` activity. |
+| Add relation | Add one directed relation to the source task only after confirming both tasks exist, source and target differ, and the same `targetTaskId` + `type` is not already present. Add `relation_added` activity. |
+| Delete relation | Remove the relation from the source task by relation id, update task timestamps/actor, and add `relation_deleted` activity. |
+| Create column | Reuse an existing case-insensitive column title first. If creating, add a `col-*` entry to `columns.json` with deterministic `position` and add `column_created` activity. |
+| Create label | Reuse an existing case-insensitive label name first. If creating, add a `label-*` entry under `board.json.labels` and add `label_created` activity. |
+| Resolve conflict | Update the task field only when choosing or synthesizing a new value, set the conflict's `resolved` to `true`, update sync metadata to `conflict` if unresolved conflicts remain or `pending` if all are resolved. Do not invent an activity type for conflict resolution. |
+
 ## Markdown Description Format
 
 Task descriptions support rich markdown rendered by the webview:
@@ -405,13 +441,44 @@ code blocks with language hint
 | `related` | This task is connected to the target task (general association) |
 | `duplicates` | This task is a duplicate of the target task |
 
+### Dependency Inference for Agents
+
+Before creating a task, scan existing tasks for matching titles, shared code references, parent planning tasks, prerequisites, blockers, and duplicated scope. Add relations proactively when they improve navigation or execution order.
+
+- Use `blocked-by` from the dependent task to the prerequisite task.
+- Use `blocks` only when the current task is clearly the prerequisite preventing the target task.
+- Use `related` for shared context without ordering, including tasks from the same plan or touching the same subsystem.
+- Use `duplicates` for near-identical work; prefer updating the existing task instead of creating a duplicate when possible.
+- Do not create reciprocal dependency edges by default. A single directed relation is enough and avoids duplicated map lines.
+- Never relate a task to itself, and never add the same `targetTaskId` + `type` twice on one source task.
+
 ## Due Date States
 
 The webview calculates due date states for display:
 - **`none`**: No dueDate set
 - **`future`**: Due date is more than 3 days away
 - **`soon`**: Due date is within the next 3 days
-- **`overdue`**: Due date has passed and task is not in a "done" column
+- **`overdue`**: Task card display marks any past dueDate as overdue. Insights metrics exclude tasks in done-like columns from the overdue count.
+
+## Column and Label Stewardship
+
+Agents should keep the board taxonomy useful without creating noisy one-off structure.
+
+### Columns
+
+- Reuse an existing column first, comparing titles case-insensitively and ignoring punctuation differences.
+- Create a column only for a real workflow state that will hold multiple tasks or materially improves visibility, such as `Backlog`, `Blocked`, `Review`, or `QA`.
+- Place new columns deterministically: `Backlog` before `To Do`; `Blocked` after `To Do`; `Review` or `QA` before done-like columns; otherwise append after the current rightmost non-done column.
+- Use clear, workflow-state names. Do not create columns for labels, individual features, people, or temporary notes.
+- Do not delete columns autonomously. The extension's `deleteColumn` behavior deletes every task currently in that column.
+
+### Labels
+
+- Reuse existing labels case-insensitively before creating a new label.
+- Prefer stable category labels: `bug`, `feat`, `docs`, `test`, `refactor`, `ci`, `security`, `perf`, `ux`, `infra`, and `chore`.
+- Create custom labels only when at least two tasks share the category or the user explicitly asks for that category.
+- Keep labels noun-like and short. Do not encode status, priority, due date, or assignee as a label.
+- Choose readable, stable hex colors. Reuse the nearest existing category color when unsure.
 
 ## Sync System
 
@@ -420,8 +487,8 @@ The webview calculates due date states for display:
 1. **Shadow branch pattern**: All sync happens on a dedicated Git branch `lynvo-sync`
 2. **Temporary worktree**: A temporary Git worktree is created in the OS temp directory (`/tmp/lynvo-sync-*` on Linux, `/var/folders/...` on macOS) for merge operations
 3. **Isolation**: The `.vscode/lynvo/` folder is excluded from the active worktree via `.git/info/exclude`
-4. **Merge strategy**: Local and remote boards are merged per task; the task with newer `updatedAt` wins entirely. Fields that differ between local and remote tasks (with different timestamps) are recorded as conflict entries, not auto-resolved.
-5. **Conflict detection**: Fields that differ between local and remote (with different timestamps) create conflict records
+4. **Merge strategy**: Local and remote boards are merged per task; the task with newer `updatedAt` wins entirely. When the local task wins over an existing remote task with a different timestamp, differing fields are recorded as conflict entries instead of being auto-resolved.
+5. **Conflict detection**: Conflict records are created for differing task fields only in the local-wins path. Remote-newer tasks can win silently.
 6. **Tombstone handling**: Deleted entities are tracked to prevent resurrection during merges
 7. **Push retry**: Push is attempted twice with different ref specs before failing
 8. **Cleanup**: Temporary worktree is removed after sync completes
@@ -451,6 +518,31 @@ When conflicts are detected:
 2. The user is prompted to open the Conflict Center
 3. Each conflict can be resolved as `"local"` (keep local value) or `"remote"` (accept remote value)
 4. When resolving as `"remote"`, the task field is updated to the remote value
+
+### Autonomous Conflict Resolution for Agents
+
+Agents may resolve conflicts directly when the user has asked for autonomous task management or when a conflict blocks progress. Resolve only unresolved `entityType: "task"` conflicts with supported fields (`title`, `description`, `status`, `priority`, `dueDate`). Leave unknown conflict shapes untouched.
+
+Resolution procedure:
+
+1. Read `metadata/conflicts.json`, `columns.json`, and the affected task file.
+2. For each unresolved conflict, choose a value using the field policy below.
+3. Apply the chosen value to the task only when it differs from the current task value.
+4. Set `conflict.resolved = true`.
+5. Update the task's `updatedAt` and `lastModifiedBy` if the task field changed.
+6. Update `metadata/sync.json`: use `status: "conflict"` while unresolved conflicts remain, otherwise `status: "pending"` with `pendingChanges: true`.
+
+Field policy:
+
+| Field | Autonomous resolution rule |
+|---|---|
+| `title` | Prefer the non-empty, non-placeholder, more specific title. If both are useful, choose the clearer title that mentions the concrete subsystem or action. |
+| `description` | Prefer the value that is a strict superset. If both contain unique information, synthesize both with headings `Local notes` and `Remote notes`, preserving all non-duplicate content. |
+| `status` | Choose the furthest valid workflow stage by column position, preferring done-like columns when one side is done-like. If the chosen status does not exist, use the other valid status; if neither exists, use the leftmost column. |
+| `priority` | Choose the higher urgency using `high > medium > low`. If one value is invalid, use the valid value; if both are invalid, use `medium`. |
+| `dueDate` | Choose the earlier non-null numeric due date. If one side is null or invalid, use the valid date; if both are null or invalid, clear `dueDate`. |
+
+General rule: non-empty beats empty when the field policy does not decide. Do not invent unsupported fields, unsupported conflict types, or a new activity type for conflict resolution.
 
 ## Presence System
 
@@ -507,6 +599,7 @@ The extension provides 6 views accessible via the toolbar tabs:
 | `lynvo.quickCreateTask` | Lynvo: Quick Create Task | Activity bar menu, Command Palette |
 | `lynvo.createTaskFromCode` | Lynvo: Create Task from Selection | Editor context menu (right-click on selection) |
 | `lynvo.syncBoard` | Lynvo: Sync Team Board | Activity bar menu, Command Palette |
+| `lynvo.installSkills` | Lynvo: Install Agent Skills | Activity bar menu, Command Palette |
 
 ## Webview Message Protocol
 
@@ -679,9 +772,9 @@ When the implementation task completes:
 2. **Update checklist items as you work** — this gives the user real-time visibility on the board
 3. **Use descriptive titles** — they appear on the board cards and in the activity feed
 4. **Include code references** when creating tasks from code analysis (use `codeReference` with relative file paths and 1-based line numbers)
-5. **Use relations** to document dependencies between tasks (`blocks`, `blocked-by`, `related`, `duplicates`)
+5. **Use relations** to document dependencies between tasks (`blocks`, `blocked-by`, `related`, `duplicates`) after scanning existing tasks for prerequisites, duplicates, and shared code references
 6. **Set due dates** when there are time constraints (convert dates to Unix timestamps in milliseconds)
-7. **Apply labels** to categorize work (`bug`, `feat`, or create custom labels)
+7. **Apply labels** to categorize work (`bug`, `feat`, or reusable custom labels); create new labels only for stable categories
 8. **Create activity entries** for every meaningful change so the Activity Feed stays accurate
 9. **Move tasks to `done`** only when the work is fully complete and verified
 10. **Trigger sync** after significant changes if working in a team environment
@@ -689,6 +782,8 @@ When the implementation task completes:
 12. **Always update `updatedAt`** and `lastModifiedBy` on every task mutation
 13. **When deleting**, always create a tombstone entry to prevent the entity from reappearing after sync
 14. **Use the `openCode` message** to navigate the user to code references from the board
+15. **Mark sync pending** after every direct JSON mutation by updating `metadata/sync.json`
+16. **Resolve conflicts deterministically** when autonomous operation is requested and the supported field policy can choose a safe value
 
 ## Important Operational Notes
 
@@ -699,7 +794,7 @@ The `openCode` message validates file paths: must be relative (no `..`, no absol
 Deleting a column also deletes **all tasks** that were in that column. Use with caution.
 
 ### Sync Merge Behavior
-During sync, the entire task with the newer `updatedAt` wins — not individual fields. Fields that differ between local and remote versions of the same task are recorded as conflict entries in `metadata/conflicts.json` for manual resolution.
+During sync, the entire task with the newer `updatedAt` wins, not individual fields. Conflict entries are created for supported differing fields when a local task wins over an existing remote task with a different timestamp. A remote-newer task can win without creating a conflict record.
 
 ### `settings.json`
 The extension writes `settings.json` as an empty object `{}` on every save. Do not store custom data there.
@@ -719,3 +814,4 @@ The extension writes `settings.json` as an empty object `{}` on every save. Do n
 | Create column | Modify `columns.json` + write activity | `column_created` |
 | Create label | Modify `board.json` labels + write activity | `label_created` |
 | Resolve conflict | Modify `tasks/{taskId}.json` + update `metadata/conflicts.json` | — |
+| Mark sync pending | Modify `metadata/sync.json` | — |
