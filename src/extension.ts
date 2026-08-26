@@ -5,15 +5,144 @@ import { DataManager } from "./providers/DataManager";
 import { LynvoMenuProvider } from "./providers/LynvoMenuProvider";
 import { GitService } from "./providers/GitService";
 import { SkillInstaller } from "./providers/SkillInstaller";
+import { CodeReference } from "./types";
+import {
+  appendMarker,
+  deriveTitle,
+  generateTodoId,
+  lineHasMarker,
+  lineHasTodoKeyword,
+  TODO_KEYWORDS,
+} from "./providers/TodoTracker";
+
+function selectionContainsTodo(editor: vscode.TextEditor | undefined): boolean {
+  if (!editor || editor.selection.isEmpty) {
+    return false;
+  }
+  const startLine = editor.selection.start.line;
+  const endLine = editor.selection.end.line;
+  for (let i = startLine; i <= endLine; i++) {
+    if (lineHasTodoKeyword(editor.document.lineAt(i).text)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function updatePromoteTodoContext(): void {
+  const has = selectionContainsTodo(vscode.window.activeTextEditor);
+  void vscode.commands.executeCommand("setContext", "lynvo.selectionHasTodo", has);
+}
 
 async function createTask(
    title: string,
    description: string,
    columnId: string | undefined,
-   codeRef?: { filePath: string; lineStart: number; lineEnd: number }
+   codeRef?: CodeReference
 ): Promise<void> {
    await DataManager.createTask(title.trim(), description, columnId, [], codeRef);
    vscode.window.showInformationMessage("Task created in Lynvo.");
+   LynvoPanel.refreshData();
+   GitService.scheduleBoardSync();
+}
+
+/**
+ * Promote the selected source lines that contain a TODO keyword (TODO/IDEA/FIXME)
+ * into Lynvo tasks. Each such line gets a unique marker token appended to it, and a
+ * task is created that links to the file via that marker (robust to later edits).
+ */
+async function promoteTodo(): Promise<void> {
+   const editor = vscode.window.activeTextEditor;
+   if (!editor) {
+     vscode.window.showErrorMessage("No file is currently open.");
+     return;
+   }
+   if (!vscode.workspace.getWorkspaceFolder(editor.document.uri)) {
+     vscode.window.showErrorMessage(
+       "Lynvo can only promote TODOs in files inside the workspace.",
+     );
+     return;
+   }
+   if (editor.selection.isEmpty) {
+     vscode.window.showErrorMessage("Select one or more TODO lines first.");
+     return;
+   }
+
+   const startLine = editor.selection.start.line;
+   const endLine = editor.selection.end.line;
+
+   type TodoLine = { lineIndex: number; text: string };
+   const candidates: TodoLine[] = [];
+   for (let i = startLine; i <= endLine; i++) {
+     const text = editor.document.lineAt(i).text;
+     if (lineHasTodoKeyword(text)) {
+       candidates.push({ lineIndex: i, text });
+     }
+   }
+
+   if (candidates.length === 0) {
+     vscode.window.showErrorMessage(
+       `No ${TODO_KEYWORDS.join("/")} found in the selection.`,
+     );
+     return;
+   }
+
+   const alreadyTracked = candidates.filter((candidate) => lineHasMarker(candidate.text));
+   if (alreadyTracked.length > 0) {
+     vscode.window.showErrorMessage(
+       "Selection already contains Lynvo-tracked TODO(s). Use 'Lynvo: Remove tracking' first.",
+     );
+     return;
+   }
+
+   const filePath = vscode.workspace.asRelativePath(editor.document.uri);
+
+   const prepared = candidates.map((candidate) => ({
+     lineIndex: candidate.lineIndex,
+     todoId: generateTodoId(),
+     title: deriveTitle(candidate.text),
+     description: candidate.text.trim(),
+   }));
+
+   // Append each marker to its line through the live document (respects unsaved edits).
+   const edit = new vscode.WorkspaceEdit();
+   for (const item of prepared) {
+     const line = editor.document.lineAt(item.lineIndex);
+     edit.replace(
+       editor.document.uri,
+       new vscode.Range(line.range.start, line.range.end),
+       appendMarker(line.text, item.todoId),
+     );
+   }
+   const applied = await vscode.workspace.applyEdit(edit);
+   if (!applied) {
+     vscode.window.showErrorMessage("Lynvo could not update the file.");
+     return;
+   }
+   await new Promise<void>((resolve) => {
+     editor.document.save().then(
+       () => resolve(),
+       (error) => {
+         console.error("Lynvo: failed to save promoted TODO file", error);
+         resolve();
+       },
+     );
+   });
+
+   // Create one task per promoted line, linked by the marker token.
+   for (const item of prepared) {
+     await DataManager.createTask(item.title, item.description, undefined, [], {
+       filePath,
+       todoId: item.todoId,
+     });
+   }
+
+   const count = prepared.length;
+   vscode.window.showInformationMessage(
+     count === 1
+       ? "1 TODO promoted to a Lynvo task."
+       : `${count} TODOs promoted to Lynvo tasks.`,
+   );
    LynvoPanel.refreshData();
    GitService.scheduleBoardSync();
 }
@@ -83,6 +212,21 @@ export function activate(context: vscode.ExtensionContext) {
   boardWatcher.onDidChange(schedulePanelRefresh, null, context.subscriptions);
   boardWatcher.onDidCreate(schedulePanelRefresh, null, context.subscriptions);
   boardWatcher.onDidDelete(schedulePanelRefresh, null, context.subscriptions);
+
+  // Keep the "Promote TODO" context-menu item visible only while the active
+  // selection contains a known TODO keyword.
+  const refreshPromoteContext = () => updatePromoteTodoContext();
+  vscode.window.onDidChangeTextEditorSelection(
+    refreshPromoteContext,
+    null,
+    context.subscriptions,
+  );
+  vscode.window.onDidChangeActiveTextEditor(
+    refreshPromoteContext,
+    null,
+    context.subscriptions,
+  );
+  updatePromoteTodoContext();
 
   DataManager.initializeBoard().catch((err) =>
     console.error("Lynvo Init Error:", err),
@@ -218,36 +362,8 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("lynvo.createTaskFromCode", async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        vscode.window.showErrorMessage("No file is currently open.");
-        return;
-      }
-
-      const selection = editor.selection;
-      const text = editor.document.getText(selection).trim();
-      if (!text) {
-        vscode.window.showErrorMessage(
-          "Select a code fragment first.",
-        );
-        return;
-      }
-
-      const title = await vscode.window.showInputBox({
-        prompt: "Task title",
-        validateInput: (value) =>
-          value.trim().length === 0 ? "Title cannot be empty." : null,
-      });
-      if (!title) {return;}
-
-      const codeRef = {
-        filePath: vscode.workspace.asRelativePath(editor.document.uri),
-        lineStart: selection.start.line + 1,
-        lineEnd: selection.end.line + 1,
-      };
-
-       await createTask(title.trim(), text, undefined, codeRef);
+    vscode.commands.registerCommand("lynvo.promoteTodo", async () => {
+      await promoteTodo();
     }),
   );
 

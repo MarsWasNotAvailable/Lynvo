@@ -54,9 +54,9 @@ export class LynvoMenuProvider
       icon: "add",
     },
     {
-      label: "New Task from Code",
-      command: "lynvo.createTaskFromCode",
-      tooltip: "Crea una tarea usando la selección actual de código",
+      label: "Promote TODO to Task",
+      command: "lynvo.promoteTodo",
+      tooltip: "Promueve las líneas TODO/IDEA/FIXME seleccionadas a tareas",
       icon: "code",
     },
     {

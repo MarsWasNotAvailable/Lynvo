@@ -57,12 +57,64 @@ type WebviewOutboundMessage =
   | { command: "createLabel"; name: string; color: string }
   | { command: "deleteLabel"; labelId: string }
   | { command: "resolveConflict"; conflictId: string; resolution: "local" | "remote" }
-  | { command: "openCode"; filePath: string; lineStart: number; lineEnd: number };
+  | {
+      command: "openCode";
+      filePath: string;
+      todoId?: string;
+      lineStart?: number;
+      lineEnd?: number;
+    }
+  | { command: "deleteTodoLine"; taskId: string };
 
 declare const acquireVsCodeApi: () => {
   postMessage: (msg: WebviewOutboundMessage) => void;
 };
 const vscode = acquireVsCodeApi();
+
+const EditIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+  </svg>
+);
+
+const DeleteIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <line x1="10" y1="11" x2="10" y2="17" />
+    <line x1="14" y1="11" x2="14" y2="17" />
+  </svg>
+);
+
+const iconButtonStyle: React.CSSProperties = {
+  padding: "2px 5px",
+  lineHeight: 0,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
 
 type LynvoView = "board" | "table" | "activity" | "conflicts" | "insights" | "labels";
 
@@ -1684,15 +1736,8 @@ export const App: React.FC = () => {
                 {task.title}
               </h4>
               <div style={{ position: "absolute", top: "8px", right: "8px", display: "flex", gap: "2px" }}>
-	                <button className="icon-btn" onClick={() => startEditingTask(task)}>
-	                  E
-	                </button>
-                <button
-                  className="icon-btn delete"
-                  onClick={() => vscode.postMessage({ command: "deleteTask", taskId: task.id })}
-	                >
-	                  D
-	                </button>
+	                <button className="icon-btn" onClick={() => startEditingTask(task)} title="Edit" aria-label="Edit" style={iconButtonStyle}><EditIcon /></button>
+                <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteTask", taskId: task.id })} title="Delete" aria-label="Delete" style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
               </div>
             </div>
 
@@ -1774,26 +1819,65 @@ export const App: React.FC = () => {
 
             {task.codeReference && (
               <div
-                onClick={() =>
-                  vscode.postMessage({
-                    command: "openCode",
-                    filePath: task.codeReference!.filePath,
-                    lineStart: task.codeReference!.lineStart,
-                    lineEnd: task.codeReference!.lineEnd,
-                  })
-                }
                 style={{
-                  fontSize: "10px",
-                  backgroundColor: "var(--vscode-button-secondaryBackground)",
-                  padding: "3px 6px",
-                  borderRadius: "3px",
-                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
                   marginBottom: "8px",
-                  display: "inline-block",
-                  color: "var(--vscode-button-secondaryForeground)",
+                  flexWrap: "wrap",
                 }}
               >
-                {task.codeReference.filePath.split("/").pop()} · L{task.codeReference.lineStart}
+                <div
+                  onClick={() =>
+                    vscode.postMessage({
+                      command: "openCode",
+                      filePath: task.codeReference!.filePath,
+                      ...(task.codeReference!.todoId
+                        ? { todoId: task.codeReference!.todoId }
+                        : {
+                            lineStart: task.codeReference!.lineStart,
+                            lineEnd: task.codeReference!.lineEnd,
+                          }),
+                    })
+                  }
+                  style={{
+                    fontSize: "10px",
+                    backgroundColor: "var(--vscode-button-secondaryBackground)",
+                    padding: "3px 6px",
+                    borderRadius: "3px",
+                    cursor: "pointer",
+                    display: "inline-block",
+                    color: "var(--vscode-button-secondaryForeground)",
+                  }}
+                  title="Open in editor"
+                >
+                  {task.codeReference.filePath.split("/").pop()} ·{" "}
+                  {task.codeReference.todoId
+                    ? "TODO"
+                    : `L${task.codeReference.lineStart ?? "?"}`}
+                </div>
+                {task.codeReference.todoId && (
+                  <button
+                    onClick={() =>
+                      vscode.postMessage({
+                        command: "deleteTodoLine",
+                        taskId: task.id,
+                      })
+                    }
+                    style={{
+                      fontSize: "10px",
+                      cursor: "pointer",
+                      border: "1px solid var(--vscode-input-border, transparent)",
+                      backgroundColor: "var(--vscode-input-background)",
+                      color: "var(--vscode-errorForeground)",
+                      padding: "2px 6px",
+                      borderRadius: "3px",
+                    }}
+                    title="Remove the TODO line from the code (the task stays on the board)"
+                  >
+                    Remove line
+                  </button>
+                )}
               </div>
             )}
             <div
@@ -2765,8 +2849,8 @@ export const App: React.FC = () => {
 	                      <span className="lynvo-count">{columnTasks.length}</span>
 	                    </h3>
 	                    <div style={{ display: "flex", gap: "5px" }}>
-                      <button className="icon-btn" onClick={() => startEditingColumn(col)}>E</button>
-                      <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteColumn", colId: col.id })}>D</button>
+                      <button className="icon-btn" onClick={() => startEditingColumn(col)} title="Edit" aria-label="Edit" style={iconButtonStyle}><EditIcon /></button>
+                      <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteColumn", colId: col.id })} title="Delete" aria-label="Delete" style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
                     </div>
                   </div>
                 )}

@@ -21,7 +21,7 @@ const requiredCommands = [
   "lynvo.openInsights",
   "lynvo.syncBoard",
   "lynvo.quickCreateTask",
-  "lynvo.createTaskFromCode",
+  "lynvo.promoteTodo",
   "lynvo.connectGitHub",
 ];
 

@@ -38,7 +38,7 @@
     "onCommand:lynvo.openLabels",
     "onCommand:lynvo.openInsights",
     "onCommand:lynvo.quickCreateTask",
-    "onCommand:lynvo.createTaskFromCode",
+    "onCommand:lynvo.promoteTodo",
     "onCommand:lynvo.syncBoard",
     "onCommand:lynvo.connectGitHub",
     "onCommand:lynvo.installSkills"
@@ -83,8 +83,8 @@
         "title": "Lynvo: Sync Team Board"
       },
       {
-        "command": "lynvo.createTaskFromCode",
-        "title": "Lynvo: Create Task from Selection"
+        "command": "lynvo.promoteTodo",
+        "title": "Lynvo: Promote TODO to Task"
       },
       {
         "command": "lynvo.installSkills",
@@ -94,8 +94,9 @@
     "menus": {
       "editor/context": [
         {
-          "command": "lynvo.createTaskFromCode",
-          "group": "navigation"
+          "command": "lynvo.promoteTodo",
+          "group": "navigation",
+          "when": "lynvo.selectionHasTodo"
         }
       ]
     },

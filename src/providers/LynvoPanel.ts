@@ -2,6 +2,11 @@ import * as vscode from "vscode";
 import { DataManager } from "./DataManager";
 import { GitService } from "./GitService";
 import { LynvoTaskRelationType } from "../types";
+import {
+  deleteMarkerLineFromFile,
+  findMarkerLineIndex,
+  removeMarkerFromFile,
+} from "./TodoTracker";
 
 type LynvoView =
   | "board"
@@ -49,17 +54,38 @@ const asResolution = (value: unknown): "local" | "remote" | undefined =>
 
 const asCodeReference = (
   value: unknown,
-): { filePath: string; lineStart: number; lineEnd: number } | undefined => {
+): {
+  filePath: string;
+  todoId?: string;
+  lineStart?: number;
+  lineEnd?: number;
+} | undefined => {
   if (!isRecord(value)) {
     return undefined;
   }
   const filePath = asString(value.filePath);
-  const lineStart = asNumber(value.lineStart);
-  const lineEnd = asNumber(value.lineEnd);
-  if (!filePath || lineStart === undefined || lineEnd === undefined) {
+  if (!filePath) {
     return undefined;
   }
-  return { filePath, lineStart, lineEnd };
+  const result: {
+    filePath: string;
+    todoId?: string;
+    lineStart?: number;
+    lineEnd?: number;
+  } = { filePath };
+  const todoId = asString(value.todoId);
+  if (todoId) {
+    result.todoId = todoId;
+  }
+  const lineStart = asNumber(value.lineStart);
+  if (lineStart !== undefined) {
+    result.lineStart = lineStart;
+  }
+  const lineEnd = asNumber(value.lineEnd);
+  if (lineEnd !== undefined) {
+    result.lineEnd = lineEnd;
+  }
+  return result;
 };
 
 const isSafeWorkspaceRelativePath = (filePath: string): boolean =>
@@ -256,12 +282,25 @@ export class LynvoPanel {
             if (!taskId) {
               return;
             }
+            const board = await DataManager.loadBoard();
+            const task = board?.tasks[taskId];
+            const todoId = task?.codeReference?.todoId;
+            const filePath = task?.codeReference?.filePath;
+            const hasMarker = Boolean(
+              todoId && filePath && isSafeWorkspaceRelativePath(filePath),
+            );
             const confirmTask = await vscode.window.showWarningMessage(
-              "Delete task?",
+              hasMarker
+                ? "Delete task and remove its Lynvo marker from the file?"
+                : "Delete task?",
               { modal: true },
               "Delete",
             );
             if (confirmTask === "Delete") {
+              if (todoId && filePath && isSafeWorkspaceRelativePath(filePath)) {
+                // Demote: strip the marker token but keep the comment line itself.
+                await removeMarkerFromFile(filePath, todoId);
+              }
               await DataManager.deleteTask(taskId);
               LynvoPanel.refreshDataAndScheduleSync();
             }
@@ -430,16 +469,29 @@ export class LynvoPanel {
           }
           case "openCode": {
             const filePath = asString(message.filePath);
-            const lineStart = asNumber(message.lineStart);
-            if (
-              !filePath ||
-              !isSafeWorkspaceRelativePath(filePath) ||
-              lineStart === undefined
-            ) {
+            if (!filePath || !isSafeWorkspaceRelativePath(filePath)) {
               return;
             }
             const folders = vscode.workspace.workspaceFolders;
             if (!folders || folders.length === 0) {
+              return;
+            }
+
+            let lineNumber: number | undefined;
+            const todoId = asString(message.todoId);
+            if (todoId) {
+              const index = await findMarkerLineIndex(filePath, todoId);
+              if (index !== -1) {
+                lineNumber = index + 1;
+              }
+            }
+            if (lineNumber === undefined) {
+              lineNumber = asNumber(message.lineStart);
+            }
+            if (lineNumber === undefined) {
+              vscode.window.showWarningMessage(
+                "Lynvo could not locate the linked line in the file.",
+              );
               return;
             }
 
@@ -449,12 +501,50 @@ export class LynvoPanel {
               doc,
               vscode.ViewColumn.Beside,
             );
-            const pos = new vscode.Position(Math.max(0, lineStart - 1), 0);
+            const pos = new vscode.Position(Math.max(0, lineNumber - 1), 0);
             editor.selection = new vscode.Selection(pos, pos);
             editor.revealRange(
               new vscode.Range(pos, pos),
               vscode.TextEditorRevealType.InCenter,
             );
+            return;
+          }
+          case "deleteTodoLine": {
+            const taskId = asString(message.taskId);
+            if (!taskId) {
+              return;
+            }
+            const board = await DataManager.loadBoard();
+            const task = board?.tasks[taskId];
+            const todoId = task?.codeReference?.todoId;
+            const filePath = task?.codeReference?.filePath;
+            if (!todoId || !filePath || !isSafeWorkspaceRelativePath(filePath)) {
+              vscode.window.showWarningMessage(
+                "This task is not linked to a Lynvo TODO marker.",
+              );
+              return;
+            }
+            const confirm = await vscode.window.showWarningMessage(
+              `Remove the TODO line from ${filePath}? The task stays on the board.`,
+              { modal: true },
+              "Remove",
+            );
+            if (confirm !== "Remove") {
+              return;
+            }
+            const deleted = await deleteMarkerLineFromFile(filePath, todoId);
+            if (!deleted) {
+              vscode.window.showErrorMessage(
+                "Could not find the Lynvo TODO marker in the file.",
+              );
+              return;
+            }
+            // Keep the task on the board; just drop its code link so it stays tracked but untracked in code.
+            await DataManager.clearTaskCodeReference(taskId);
+            vscode.window.showInformationMessage(
+              "TODO line removed. Task kept on the board.",
+            );
+            LynvoPanel.refreshDataAndScheduleSync();
             return;
           }
         }

@@ -10,8 +10,11 @@ export interface LynvoPresenceUser extends LynvoUser {
 
 export interface CodeReference {
   filePath: string;
-  lineStart: number;
-  lineEnd: number;
+  /** Unique Lynvo TODO marker token embedded in the source file (preferred). */
+  todoId?: string;
+  /** Legacy line-based reference, kept for backward compatibility with old boards. */
+  lineStart?: number;
+  lineEnd?: number;
 }
 
 export interface LynvoColumn {

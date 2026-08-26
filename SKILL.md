@@ -282,7 +282,7 @@ If a task's `status` references a deleted column, it is reassigned to the leftmo
 | Command | Purpose |
 |---|---|
 | `lynvo.quickCreateTask` | Create task via interactive input prompts |
-| `lynvo.createTaskFromCode` | Create task from currently selected code (captures codeReference) |
+| `lynvo.promoteTodo` | Promote selected TODO/IDEA/FIXME lines into tasks (each gets a unique marker + codeReference) |
 | `lynvo.openBoard` | Open the Kanban board webview |
 | `lynvo.openTable` | Open the table view webview |
 | `lynvo.openActivity` | Open the activity feed webview |
@@ -597,7 +597,7 @@ The extension provides 6 views accessible via the toolbar tabs:
 | `lynvo.openConflicts` | Lynvo: Open Conflict Center | Activity bar menu, Command Palette |
 | `lynvo.openLabels` | Lynvo: Open Labels Manager | Activity bar menu, Command Palette |
 | `lynvo.quickCreateTask` | Lynvo: Quick Create Task | Activity bar menu, Command Palette |
-| `lynvo.createTaskFromCode` | Lynvo: Create Task from Selection | Editor context menu (right-click on selection) |
+| `lynvo.promoteTodo` | Lynvo: Promote TODO to Task | Editor context menu (right-click on a TODO selection) |
 | `lynvo.syncBoard` | Lynvo: Sync Team Board | Activity bar menu, Command Palette |
 | `lynvo.installSkills` | Lynvo: Install Agent Skills | Activity bar menu, Command Palette |
 

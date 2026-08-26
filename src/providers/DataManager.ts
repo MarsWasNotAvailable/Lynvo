@@ -743,6 +743,25 @@ export class DataManager {
     });
   }
 
+  public static async clearTaskCodeReference(taskId: string): Promise<void> {
+    await this.mutateBoard(async (board) => {
+      const task = board.tasks[taskId];
+      if (!task) {return;}
+
+      const user = await AuthProvider.getGitHubUser();
+      task.codeReference = undefined;
+      task.updatedAt = Date.now();
+      if (user) {task.lastModifiedBy = user;}
+      this.addActivity(
+        board,
+        "task_updated",
+        `Removed code link from "${task.title}"`,
+        user,
+        { taskId },
+      );
+    });
+  }
+
   public static async deleteTask(taskId: string): Promise<void> {
     await this.mutateBoard(async (board) => {
       const taskTitle = board.tasks[taskId]?.title || "task";

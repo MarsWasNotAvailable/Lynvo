@@ -83,7 +83,7 @@ Once installed, Lynvo appears in the Activity Bar. Open the Command Palette (`Ct
 | `Lynvo: Open Labels Manager`        | Opens label management                                  |
 | `Lynvo: Open Insights View`         | Opens project analytics                                 |
 | `Lynvo: Quick Create Task`          | Creates a task without opening the board                |
-| `Lynvo: Create Task from Selection` | Creates a task linked to selected code                  |
+| `Lynvo: Promote Selection To Task`  | Creates a task linked to selected code                  |
 | `Lynvo: Sync Team Board`            | Runs a manual shadow-branch sync                        |
 | `Lynvo: Connect GitHub`             | Stores your GitHub identity for authorship and presence |
 
