@@ -197,6 +197,19 @@ export class DataManager {
   }
 
   private static async writeJsonAtomic(uri: vscode.Uri, value: unknown): Promise<void> {
+    const data = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+
+    // Write-on-change: skip the write (and any mtime update) when the file
+    // already holds identical content, so idle re-saves don't churn the folder.
+    try {
+      const existing = await vscode.workspace.fs.readFile(uri);
+      if (Buffer.compare(existing, data) === 0) {
+        return;
+      }
+    } catch {
+      // File does not exist yet (or is unreadable) -> write it below.
+    }
+
     const parent = uri.with({ path: uri.path.replace(/\/[^/]+$/, "") });
     await vscode.workspace.fs.createDirectory(parent);
 
@@ -204,7 +217,6 @@ export class DataManager {
       parent,
       `.${uri.path.split("/").pop()}.${Date.now()}.tmp`,
     );
-    const data = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
     await vscode.workspace.fs.writeFile(tempUri, data);
     await vscode.workspace.fs.rename(tempUri, uri, { overwrite: true });
   }

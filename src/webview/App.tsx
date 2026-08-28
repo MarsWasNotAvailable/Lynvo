@@ -143,7 +143,8 @@ const clampMapZoom = (value: number): number =>
   Math.max(minMapZoom, Math.min(maxMapZoom, Math.round(value * 100) / 100));
 
 type WebviewInboundMessage =
-  | { command: "loadData"; data: LynvoBoard | null }
+  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean }
+  | { command: "setRemotePending"; pending: boolean }
   | { command: "switchView"; view: LynvoView };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -160,7 +161,14 @@ const isLynvoView = (value: unknown): value is LynvoView =>
 const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
   if (!isRecord(value)) {return null;}
   if (value.command === "loadData") {
-    return { command: "loadData", data: (value.data as LynvoBoard | null) || null };
+    return {
+      command: "loadData",
+      data: (value.data as LynvoBoard | null) || null,
+      remotePending: value.remotePending === true,
+    };
+  }
+  if (value.command === "setRemotePending") {
+    return { command: "setRemotePending", pending: value.pending === true };
   }
   if (value.command === "switchView" && isLynvoView(value.view)) {
     return { command: "switchView", view: value.view };
@@ -923,6 +931,7 @@ export const App: React.FC = () => {
   const [activityTypeFilter, setActivityTypeFilter] = useState<string>("");
   const [activityUserFilter, setActivityUserFilter] = useState<string>("");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [remotePending, setRemotePending] = useState(false);
 
   const [addingTaskColId, setAddingTaskColId] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
@@ -976,6 +985,11 @@ export const App: React.FC = () => {
       if (message.command === "loadData") {
         setBoardData(message.data);
         setIsSyncing(false);
+        setRemotePending(Boolean(message.remotePending));
+      }
+
+      if (message.command === "setRemotePending") {
+        setRemotePending(message.pending);
       }
 
       if (message.command === "switchView") {
@@ -2759,6 +2773,23 @@ export const App: React.FC = () => {
           >
             {isSyncing ? "Syncing..." : "Sync Team"}
           </button>
+          {remotePending && (
+            <span
+              title="Remote board updates are available. Click Sync Team to pull them."
+              style={{
+                fontSize: "11px",
+                border: "1px solid var(--vscode-charts-yellow)",
+                color: "var(--vscode-charts-yellow)",
+                background: "var(--vscode-inputValidation-warningBackground, transparent)",
+                borderRadius: "999px",
+                padding: "3px 8px",
+                textTransform: "uppercase",
+                fontWeight: 700,
+              }}
+            >
+              Updates available
+            </span>
+          )}
           <span
             title={boardData?.sync?.message || syncStatus}
             style={{

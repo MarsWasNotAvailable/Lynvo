@@ -189,6 +189,16 @@ export class LynvoPanel {
       LynvoPanel.currentPanel._panel.webview.postMessage({
         command: "loadData",
         data: board,
+        remotePending: GitService.getRemotePending(),
+      });
+    }
+  }
+
+  public static postRemotePending(pending: boolean): void {
+    if (LynvoPanel.currentPanel) {
+      LynvoPanel.currentPanel._panel.webview.postMessage({
+        command: "setRemotePending",
+        pending,
       });
     }
   }
@@ -448,6 +458,8 @@ export class LynvoPanel {
           }
           case "syncBoard": {
             const result = await GitService.syncBoard();
+            // A sync pulls the remote state, so there are no more pending updates.
+            GitService.setRemotePending(false);
             if (result.success && result.hasConflicts) {
               const action = await vscode.window.showWarningMessage(
                 "Lynvo has synchronized the dashboard, but there are still conflicts to resolve.",

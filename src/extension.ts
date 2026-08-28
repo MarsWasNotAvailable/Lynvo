@@ -228,6 +228,11 @@ export function activate(context: vscode.ExtensionContext) {
   );
   updatePromoteTodoContext();
 
+  // Provide an early signal if there are remote updates available to pull.
+  GitService.checkForRemoteChanges()
+    .then((pending) => LynvoPanel.postRemotePending(pending))
+    .catch(() => {});
+
   DataManager.initializeBoard().catch((err) =>
     console.error("Lynvo Init Error:", err),
   );
@@ -252,8 +257,17 @@ export function activate(context: vscode.ExtensionContext) {
     await DataManager.touchCurrentUser().catch((err) =>
       console.error("Lynvo Presence Error:", err),
     );
+    // Periodically check for remote updates to pull (detection only, no push).
+    const remotePending = await GitService.checkForRemoteChanges();
+    LynvoPanel.postRemotePending(remotePending);
+    // Push local changes only when there are pending local changes.
+    const board = await DataManager.loadBoard();
+    if (!board || !board.sync?.pendingChanges) {
+      return;
+    }
     const result = await GitService.syncBoard();
     if (result.success) {
+      GitService.setRemotePending(false);
       await LynvoPanel.refreshData();
       if (result.hasConflicts) {
         vscode.window.showWarningMessage(

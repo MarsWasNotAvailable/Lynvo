@@ -123,7 +123,7 @@
       "properties": {
         "lynvo.autoInstallSkills": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Automatically install Lynvo agent skills (SKILL.md) for OpenCode, Claude Code, Cline, Cursor, and other AI agents on extension activation."
         }
       }

@@ -63,6 +63,7 @@ export class GitService {
     message: "Sincronización pendiente.",
   });
   private static scheduledSync: NodeJS.Timeout | undefined;
+  private static remotePending = false;
 
   private static getWorkspacePath(): string | null {
     const folders = vscode.workspace.workspaceFolders;
@@ -716,6 +717,53 @@ export class GitService {
     if (this.scheduledSync) {
       clearTimeout(this.scheduledSync);
       this.scheduledSync = undefined;
+    }
+  }
+
+  public static getRemotePending(): boolean {
+    return this.remotePending;
+  }
+
+  public static setRemotePending(pending: boolean): void {
+    this.remotePending = pending;
+  }
+
+  /**
+   * Lightweight pull-only check: fetch the shadow branch and compare its remote
+   * HEAD to the last commit we synced. Does NOT push and does NOT rewrite the
+   * board files, so it is safe to run periodically while idle.
+   */
+  public static async checkForRemoteChanges(): Promise<boolean> {
+    const workspacePath = this.getWorkspacePath();
+    if (!workspacePath) {
+      this.remotePending = false;
+      return false;
+    }
+    try {
+      const repoRoot = await this.execGit(["rev-parse", "--show-toplevel"], {
+        cwd: workspacePath,
+      });
+      await this.execGit(["fetch", "origin", this.SHADOW_BRANCH], {
+        cwd: repoRoot,
+      });
+      const remoteSha = await this.execGit(
+        ["rev-parse", `refs/remotes/origin/${this.SHADOW_BRANCH}`],
+        { cwd: repoRoot },
+      );
+      if (!remoteSha) {
+        this.remotePending = false;
+        return false;
+      }
+      const board = await DataManager.loadBoard();
+      const lastRemote = board?.sync?.lastRemoteCommit || null;
+      // No baseline yet but a remote board exists -> there is something to pull.
+      const pending = lastRemote ? remoteSha !== lastRemote : true;
+      this.remotePending = pending;
+      return pending;
+    } catch {
+      // Offline, not a git repo, or no remote branch -> nothing to report.
+      this.remotePending = false;
+      return false;
     }
   }
 }
