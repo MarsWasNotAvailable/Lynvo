@@ -630,7 +630,7 @@ export class GitService {
         return {
           success: false,
           message:
-            `Lynvo guardó los cambios localmente, pero no pudo subir lynvo-sync. ${detail}`,
+            `Lynvo could save the changes locally, but not push to the remote lynvo-sync branch. ${detail}`,
           remoteChanged: false,
           hasConflicts: false,
         };
@@ -666,7 +666,7 @@ export class GitService {
       }).catch(() => {});
       return {
         success: false,
-        message: `Lynvo no pudo sincronizar (${stage}). ${detail}`,
+        message: `Lynvo could not synchronize (${stage}). ${detail}`,
         remoteChanged: false,
         hasConflicts: false,
       };

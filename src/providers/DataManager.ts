@@ -379,7 +379,7 @@ export class DataManager {
     } catch (error) {
       console.error("Lynvo: error loading legacy board", error);
       vscode.window.showWarningMessage(
-        "Lynvo no pudo leer .vscode/lynvo.json. El archivo puede estar corrupto.",
+        "Lynvo could not read .vscode/lynvo.json. The file might be corrupted.",
       );
       return null;
     }
@@ -1005,7 +1005,7 @@ export class DataManager {
       const columnsCount = Object.keys(board.columns).length;
       if (columnsCount <= 1) {
         vscode.window.showWarningMessage(
-          "No puedes eliminar la última columna del tablero.",
+          "You can not delete the last column in the table.",
         );
         return;
       }
