@@ -47,7 +47,7 @@ Install the generated VSIX in a clean VS Code window and validate:
 - Do not commit `node_modules/`.
 - Do not commit generated `.vsix` files.
 - Keep `package-lock.json` committed.
-- Keep generated `dist/` committed if publishing directly from the repository.
+- Do not commit the `dist/` folder, which is automatically generated when publishing the vsix file.
 - Keep `.vscode/lynvo/` out of normal source branches; Lynvo sync owns it through `lynvo-sync`.
 
 ## Marketplace Notes
