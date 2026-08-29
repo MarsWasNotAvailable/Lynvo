@@ -131,7 +131,7 @@ async function promoteTodo(): Promise<void> {
 
    // Create one task per promoted line, linked by the marker token.
    for (const item of prepared) {
-     await DataManager.createTask(item.title, item.description, undefined, [], {
+     await DataManager.createTask(item.title, "" /* empty description for now */, undefined, [], {
        filePath,
        todoId: item.todoId,
      });

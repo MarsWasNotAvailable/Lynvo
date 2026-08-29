@@ -1580,6 +1580,7 @@ export const App: React.FC = () => {
               style={{ width: "100%", marginBottom: "8px", padding: "6px", boxSizing: "border-box" }}
             />
             <textarea
+              placeholder="Write a description of the task here"
               value={editDesc}
               onChange={(e) => setEditDesc(e.target.value)}
               rows={3}
@@ -2889,7 +2890,7 @@ export const App: React.FC = () => {
                 {addingTaskColId === col.id ? (
                   <div style={{ marginBottom: "15px", padding: "10px", backgroundColor: "var(--vscode-editor-background)", borderRadius: "6px", border: "1px solid var(--vscode-focusBorder)" }}>
                     <input autoFocus placeholder="Task title..." value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
-                    <textarea placeholder="Description (optional)..." value={newTaskDesc} onChange={(e) => setNewTaskDesc(e.target.value)} rows={2} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
+                    <textarea placeholder="Write a description of the task here" value={newTaskDesc} onChange={(e) => setNewTaskDesc(e.target.value)} rows={2} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
                     <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
                       <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value as Priority)} style={{ flex: 1, padding: "6px" }}>
                         <option value="low">Low Priority</option>
