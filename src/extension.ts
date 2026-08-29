@@ -10,8 +10,8 @@ import {
   appendMarker,
   deriveTitle,
   generateTodoId,
+  isTodoCommentLine,
   lineHasMarker,
-  lineHasTodoKeyword,
   TODO_KEYWORDS,
 } from "./providers/TodoTracker";
 
@@ -22,7 +22,7 @@ function selectionContainsTodo(editor: vscode.TextEditor | undefined): boolean {
   const startLine = editor.selection.start.line;
   const endLine = editor.selection.end.line;
   for (let i = startLine; i <= endLine; i++) {
-    if (lineHasTodoKeyword(editor.document.lineAt(i).text)) {
+    if (isTodoCommentLine(editor.document.lineAt(i).text)) {
       return true;
     }
   }
@@ -75,14 +75,14 @@ async function promoteTodo(): Promise<void> {
    const candidates: TodoLine[] = [];
    for (let i = startLine; i <= endLine; i++) {
      const text = editor.document.lineAt(i).text;
-     if (lineHasTodoKeyword(text)) {
+     if (isTodoCommentLine(text)) {
        candidates.push({ lineIndex: i, text });
      }
    }
 
    if (candidates.length === 0) {
      vscode.window.showErrorMessage(
-       `No ${TODO_KEYWORDS.join("/")} found in the selection.`,
+       `No ${TODO_KEYWORDS.join("/")} comment found in the selection.`,
      );
      return;
    }

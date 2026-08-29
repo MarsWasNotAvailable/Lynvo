@@ -44,6 +44,91 @@ export function removeMarker(line: string, todoId: string): string {
     .replace(/\s+$/, "");
 }
 
+/** Strip leading whitespace and a single comment opener, plus following spaces. */
+function stripCommentStart(line: string): string {
+  let t = line.replace(/^\s+/, "");
+  t = t.replace(/^(\/\*\*|\/\*|\/\/|<!--|--|#|;|\*)/, "");
+  return t.replace(/^\s+/, "");
+}
+
+/**
+ * A (single-line or multiline) comment is a promotable TODO
+ * when a TODO keyword is found as the FIRST word of a comment,
+ * followed by a space or a colon.
+ * Those rules are to meant to rule out identifiers like `TODO_KEYWORDS`
+ * or comments that merely mentions TODO.
+ */
+export function isTodoCommentLine(line: string): boolean {
+  const t = stripCommentStart(line);
+  for (const keyword of TODO_KEYWORDS) {
+    if (t.startsWith(keyword)) {
+      const rest = t.slice(keyword.length);
+      if (rest.length === 0 || /^[\s:]/.test(rest)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** NOTE : changed my mind => see notes about buildMarkerLine right below
+ * Decide where to insert the marker for a TODO found on line `i`:
+ * - single line comments : on that line;
+ * - multiline comments   : on the last line (just before the closing comment symbol).
+ */
+// export function resolveMarkerInsertion(
+//   lines: string[],
+//   i: number,
+// ): { line: number; mode: "append" | "beforeClose" } {
+//   const line = lines[i];
+//   if (line.includes("/*")) {
+//     if (line.includes("*/")) {
+//       return { line: i, mode: "beforeClose" };
+//     }
+//     for (let j = i + 1; j < lines.length; j++) {
+//       if (lines[j].includes("*/")) {
+//         return { line: j, mode: "beforeClose" };
+//       }
+//     }
+//     return { line: i, mode: "append" };
+//   }
+//   if (line.trimStart().startsWith("*") || line.includes("*/")) {
+//     for (let j = i; j < lines.length; j++) {
+//       if (lines[j].includes("*/")) {
+//         return { line: j, mode: "beforeClose" };
+//       }
+//     }
+//   }
+//   return { line: i, mode: "append" };
+// }
+
+/** NOTE : changed my mind => appendMarker (which only appends) is actually better visually and reuse same code
+ * Build the new text for a selection receiving one or more markers.
+ * The "beforeClose" mode places markers just before the comment's closing marker.
+ * The "append" mode adds the markers at the end.
+ */
+// export function buildMarkerLine(
+//   current: string,
+//   mode: "append" | "beforeClose",
+//   todoIds: string[],
+// ): string {
+//   if (todoIds.length === 0) {
+//     return current;
+//   }
+//   const ids = todoIds.join(" ");
+//   if (mode === "beforeClose") {
+//     const idx = current.indexOf("*/");
+//     if (idx === -1) {
+//       return `${current.replace(/\s+$/, "")} ${ids}`;
+//     }
+//     const head = current.slice(0, idx);
+//     const leadingWs = (head.match(/^\s*/)?.[0]) || "";
+//     const content = head.slice(leadingWs.length).replace(/\s+$/, "");
+//     return content ? `${leadingWs}${content} ${ids} */` : `${leadingWs}${ids} */`;
+//   }
+//   return `${current.replace(/\s+$/, "")} ${ids}`;
+// }
+
 /** Derive a human-readable task title from a TODO source line. */
 export function deriveTitle(line: string): string {
   let title = line.trim();
