@@ -71,64 +71,6 @@ export function isTodoCommentLine(line: string): boolean {
   return false;
 }
 
-/** NOTE : changed my mind => see notes about buildMarkerLine right below
- * Decide where to insert the marker for a TODO found on line `i`:
- * - single line comments : on that line;
- * - multiline comments   : on the last line (just before the closing comment symbol).
- */
-// export function resolveMarkerInsertion(
-//   lines: string[],
-//   i: number,
-// ): { line: number; mode: "append" | "beforeClose" } {
-//   const line = lines[i];
-//   if (line.includes("/*")) {
-//     if (line.includes("*/")) {
-//       return { line: i, mode: "beforeClose" };
-//     }
-//     for (let j = i + 1; j < lines.length; j++) {
-//       if (lines[j].includes("*/")) {
-//         return { line: j, mode: "beforeClose" };
-//       }
-//     }
-//     return { line: i, mode: "append" };
-//   }
-//   if (line.trimStart().startsWith("*") || line.includes("*/")) {
-//     for (let j = i; j < lines.length; j++) {
-//       if (lines[j].includes("*/")) {
-//         return { line: j, mode: "beforeClose" };
-//       }
-//     }
-//   }
-//   return { line: i, mode: "append" };
-// }
-
-/** NOTE : changed my mind => appendMarker (which only appends) is actually better visually and reuse same code
- * Build the new text for a selection receiving one or more markers.
- * The "beforeClose" mode places markers just before the comment's closing marker.
- * The "append" mode adds the markers at the end.
- */
-// export function buildMarkerLine(
-//   current: string,
-//   mode: "append" | "beforeClose",
-//   todoIds: string[],
-// ): string {
-//   if (todoIds.length === 0) {
-//     return current;
-//   }
-//   const ids = todoIds.join(" ");
-//   if (mode === "beforeClose") {
-//     const idx = current.indexOf("*/");
-//     if (idx === -1) {
-//       return `${current.replace(/\s+$/, "")} ${ids}`;
-//     }
-//     const head = current.slice(0, idx);
-//     const leadingWs = (head.match(/^\s*/)?.[0]) || "";
-//     const content = head.slice(leadingWs.length).replace(/\s+$/, "");
-//     return content ? `${leadingWs}${content} ${ids} */` : `${leadingWs}${ids} */`;
-//   }
-//   return `${current.replace(/\s+$/, "")} ${ids}`;
-// }
-
 /** Derive a human-readable task title from a TODO source line. */
 export function deriveTitle(line: string): string {
   let title = line.trim();
@@ -199,19 +141,37 @@ export async function removeMarkerFromFile(filePath: string, todoId: string): Pr
   return true;
 }
 
-/** Delete the entire line that contains the given marker token. Returns success. */
-export async function deleteMarkerLineFromFile(filePath: string, todoId: string): Promise<boolean> {
+/**
+ * Remove the WHOLE TODO comment from the file, located by its marker token.
+ * The marker sits on the comment's first line;
+ * for block-style comments the full comment span is removed,
+ * otherwise only that line is removed.
+ * Returns its success.
+ */
+export async function removeTodoCommentFromFile(filePath: string, todoId: string): Promise<boolean> {
   let lines: string[];
   try {
     lines = (await readWorkspaceFileText(filePath)).split("\n");
   } catch {
     return false;
   }
-  const index = lines.findIndex((line) => line.includes(todoId));
-  if (index === -1) {
+  const startIndex = lines.findIndex((line) => line.includes(todoId));
+  if (startIndex === -1) {
     return false;
   }
-  lines.splice(index, 1);
+  const firstLine = lines[startIndex].trimStart();
+  const isMultiline =
+    firstLine.startsWith("/*") || firstLine.startsWith("<!--");
+  let endIndex = startIndex;
+  if (isMultiline) {
+    for (let j = startIndex; j < lines.length; j++) {
+      if (lines[j].includes("*/") || lines[j].includes("-->")) {
+        endIndex = j;
+        break;
+      }
+    }
+  }
+  lines.splice(startIndex, endIndex - startIndex + 1);
   await writeWorkspaceFileText(filePath, lines.join("\n"));
   return true;
 }

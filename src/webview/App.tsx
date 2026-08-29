@@ -64,7 +64,8 @@ type WebviewOutboundMessage =
       lineStart?: number;
       lineEnd?: number;
     }
-  | { command: "deleteTodoLine"; taskId: string };
+  | { command: "deleteTodoLine"; taskId: string }
+  | { command: "removeCodeRefsForColumn"; colId: string };
 
 declare const acquireVsCodeApi: () => {
   postMessage: (msg: WebviewOutboundMessage) => void;
@@ -2851,6 +2852,11 @@ export const App: React.FC = () => {
         <div className="lynvo-board">
           {sortedColumns.map((col) => {
             const columnTasks = getTasksByStatusFiltered(col.id);
+            const isLastColumn =
+              sortedColumns[sortedColumns.length - 1]?.id === col.id;
+            const lingeringRefs = tasks.filter(
+              (t) => t.status === col.id && Boolean(t.codeReference?.todoId),
+            ).length;
 
             return (
               <div
@@ -2884,6 +2890,47 @@ export const App: React.FC = () => {
                       <button className="icon-btn" onClick={() => startEditingColumn(col)} title="Edit" aria-label="Edit" style={iconButtonStyle}><EditIcon /></button>
                       <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteColumn", colId: col.id })} title="Delete" aria-label="Delete" style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
                     </div>
+                  </div>
+                )}
+
+                {isLastColumn && lingeringRefs > 0 && (
+                  <div
+                    style={{
+                      marginBottom: "12px",
+                      padding: "8px 10px",
+                      borderRadius: "6px",
+                      border: "1px dashed var(--vscode-charts-yellow)",
+                      background: "var(--vscode-inputValidation-warningBackground, transparent)",
+                      fontSize: "11px",
+                      color: "var(--vscode-foreground)",
+                    }}
+                  >
+                    <div style={{ marginBottom: "6px" }}>
+                      <strong>{lingeringRefs}</strong> task
+                      {lingeringRefs > 1 ? "s" : ""} in this final column still link
+                      to a TODO in your code.
+                    </div>
+                    <button
+                      onClick={() =>
+                        vscode.postMessage({
+                          command: "removeCodeRefsForColumn",
+                          colId: col.id,
+                        })
+                      }
+                      title="Remove the whole TODO comment from your source files and unlink these tasks. The tasks stay on the board."
+                      style={{
+                        width: "100%",
+                        padding: "5px",
+                        cursor: "pointer",
+                        border: "1px solid var(--vscode-charts-yellow)",
+                        background: "transparent",
+                        color: "var(--vscode-foreground)",
+                        borderRadius: "4px",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Remove TODO comments?
+                    </button>
                   </div>
                 )}
 

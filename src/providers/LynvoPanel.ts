@@ -3,9 +3,9 @@ import { DataManager } from "./DataManager";
 import { GitService } from "./GitService";
 import { LynvoTaskRelationType } from "../types";
 import {
-  deleteMarkerLineFromFile,
   findMarkerLineIndex,
   removeMarkerFromFile,
+  removeTodoCommentFromFile,
 } from "./TodoTracker";
 
 type LynvoView =
@@ -544,7 +544,7 @@ export class LynvoPanel {
             if (confirm !== "Remove") {
               return;
             }
-            const deleted = await deleteMarkerLineFromFile(filePath, todoId);
+            const deleted = await removeTodoCommentFromFile(filePath, todoId);
             if (!deleted) {
               vscode.window.showErrorMessage(
                 "Could not find the Lynvo TODO marker in the file.",
@@ -555,6 +555,65 @@ export class LynvoPanel {
             await DataManager.clearTaskCodeReference(taskId);
             vscode.window.showInformationMessage(
               "TODO line removed. Task kept on the board.",
+            );
+            LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
+          case "removeCodeRefsForColumn": {
+            const colId = asString(message.colId);
+            if (!colId) {
+              return;
+            }
+            const board = await DataManager.loadBoard();
+            if (!board) {
+              return;
+            }
+            const targets = Object.values(board.tasks)
+              .filter(
+                (task) =>
+                  task.status === colId &&
+                  Boolean(task.codeReference?.todoId) &&
+                  Boolean(task.codeReference?.filePath) &&
+                  isSafeWorkspaceRelativePath(task.codeReference!.filePath!),
+              )
+              .map((task) => ({
+                taskId: task.id,
+                todoId: task.codeReference!.todoId!,
+                filePath: task.codeReference!.filePath!,
+              }));
+            if (targets.length === 0) {
+              vscode.window.showInformationMessage(
+                "No TODO comments to remove in this column.",
+              );
+              return;
+            }
+            const confirm = await vscode.window.showWarningMessage(
+              `Remove the TODO comments for ${targets.length} task${
+                targets.length > 1 ? "s" : ""
+              } in this final column? This deletes the whole TODO comment from your source files (the tasks stay on the board).`,
+              { modal: true },
+              "Remove comments",
+            );
+            if (confirm !== "Remove comments") {
+              return;
+            }
+            let removed = 0;
+            for (const target of targets) {
+              const ok = await removeTodoCommentFromFile(
+                target.filePath,
+                target.todoId,
+              );
+              if (ok) {
+                removed += 1;
+              }
+              await DataManager.clearTaskCodeReference(target.taskId);
+            }
+            vscode.window.showInformationMessage(
+              removed === targets.length
+                ? `${removed} TODO comment${
+                    removed > 1 ? "s" : ""
+                  } removed from your code. Tasks kept on the board.`
+                : `Removed ${removed} of ${targets.length} TODO comments. Some were already gone from the file.`,
             );
             LynvoPanel.refreshDataAndScheduleSync();
             return;
