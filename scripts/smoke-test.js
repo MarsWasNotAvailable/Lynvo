@@ -32,7 +32,7 @@ assert.ok(pkg.publisher, "publisher is required for marketplace publishing");
 assert.ok(pkg.repository?.url, "repository url is required");
 assert.ok(pkg.icon?.endsWith(".png"), "marketplace icon should be PNG");
 assert.ok(exists(pkg.icon), `missing icon: ${pkg.icon}`);
-assert.ok(exists("media/lynvo-board-preview.png"), "missing marketplace preview image");
+assert.ok(exists("media/lynvo-general.png"), "missing marketplace preview image");
 assert.ok(exists("LICENSE"), "missing LICENSE");
 assert.ok(exists("README.md"), "missing README.md");
 assert.ok(exists("CHANGELOG.md"), "missing CHANGELOG.md");
