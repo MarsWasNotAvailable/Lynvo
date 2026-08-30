@@ -109,6 +109,23 @@ const DeleteIcon = () => (
   </svg>
 );
 
+const SaveIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
 const iconButtonStyle: React.CSSProperties = {
   padding: "2px 5px",
   lineHeight: 0,
@@ -2877,7 +2894,7 @@ export const App: React.FC = () => {
                     <input type="color" value={editColColor} onChange={(e) => setEditColColor(e.target.value)} title="Pick column color" />
                     <input value={editColTitle} onChange={(e) => setEditColTitle(e.target.value)} style={{ flex: 1, padding: "4px", width: "100px" }} />
                     <button className="icon-btn" onClick={() => moveColumn(col.id, "right")}>{">"}</button>
-                    <button className="icon-btn" onClick={saveEditColumn}>S</button>
+                    <button className="icon-btn" onClick={saveEditColumn} title="Save" aria-label="Save" style={iconButtonStyle}><SaveIcon /></button>
                     <button className="icon-btn" onClick={() => setEditingColId(null)}>X</button>
                   </div>
                 ) : (
