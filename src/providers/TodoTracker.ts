@@ -31,8 +31,37 @@ export function lineHasMarker(line: string): boolean {
   return MARKER_REGEX.test(line);
 }
 
-/** Append the marker token to the end of a line (keeping it inside the existing comment). */
+/**
+ * Append the marker token to a comment line, keeping it inside the existing comment.
+ * For a single-line block comment the marker is inserted before the closing tag;
+ * otherwise it is appended at the end of the line.
+ */
 export function appendMarker(line: string, todoId: string): string {
+  const trimmed = line.trimStart();
+
+  // Test for Multiline comment opening tags, to deduce the closing tag
+  let closingTag: string | undefined;
+  if (trimmed.startsWith("<!--")) {
+    closingTag = "-->"; //XML
+  } else if (trimmed.startsWith("--[[")) {
+    closingTag = "]]";  //LUA
+  } else if (trimmed.startsWith("/*")) {
+    closingTag = "*/";  //C-like
+  }
+
+  if (closingTag) {
+    const index = line.lastIndexOf(closingTag);
+    if (index !== -1) {
+      const head = line.slice(0, index);
+      const leadingWs = (head.match(/^\s*/)?.[0]) || "";
+      const content = head.slice(leadingWs.length).replace(/\s+$/, "");
+      return content
+        ? `${leadingWs}${content} ${todoId} ${closingTag}`
+        : `${leadingWs}${todoId} ${closingTag}`;
+    }
+  }
+
+  //Plain line comments are left as a simple append.
   return `${line.replace(/\s+$/, "")} ${todoId}`;
 }
 
@@ -160,18 +189,27 @@ export async function removeTodoCommentFromFile(filePath: string, todoId: string
     return false;
   }
   const firstLine = lines[startIndex].trimStart();
-  const isMultiline =
-    firstLine.startsWith("/*") || firstLine.startsWith("<!--");
+  const isMultiline =  firstLine.startsWith("/*")   // C-like
+                    || firstLine.startsWith("<!--") // XML
+                    || firstLine.startsWith("--[[") // LUA
+                    ;
   let endIndex = startIndex;
   if (isMultiline) {
     for (let j = startIndex; j < lines.length; j++) {
-      if (lines[j].includes("*/") || lines[j].includes("-->")) {
+      if (lines[j].includes("*/") || lines[j].includes("-->")|| lines[j].includes("]]")) {
         endIndex = j;
         break;
       }
     }
   }
-  lines.splice(startIndex, endIndex - startIndex + 1);
+  let removeCount = endIndex - startIndex + 1;
+  // When the TODO comment is spaced out above and below,
+  // the removal of the TODO comment leaves two blank line.
+  // We attempt to remove the one below, if it exists.
+  if (endIndex + 1 < lines.length && lines[endIndex + 1].trim() === "") {
+    removeCount += 1;
+  }
+  lines.splice(startIndex, removeCount);
   await writeWorkspaceFileText(filePath, lines.join("\n"));
   return true;
 }
