@@ -48,7 +48,7 @@ Lynvo is designed to work **with AI coding agents** (OpenCode, Claude Code, Clin
 
 Collaborate without a central server:
 
-- **Shadow branch pattern** — All sync happens on a dedicated `lynvo-sync` branch, never touching `main` or feature branches
+- **Shadow-branch pattern** — All sync happens on a dedicated `lynvo-sync` branch, never touching `main` or feature branches
 - **Automatic sync** — Background sync every 120 seconds, plus a 15-second debounce after changes
 - **Conflict resolution** — Field-level conflicts are detected and surfaced in the Conflict Center UI
 - **Tombstone tracking** — Deleted entities are tracked to prevent resurrection during merges
@@ -84,7 +84,7 @@ Once installed, Lynvo appears in the Activity Bar. Open the Command Palette (`Ct
 | `Lynvo: Open Insights View`         | Opens project analytics                                 |
 | `Lynvo: Quick Create Task`          | Creates a task without opening the board                |
 | `Lynvo: Promote Selection To Task`  | Creates a task linked to selected code                  |
-| `Lynvo: Sync Team Board`            | Runs a manual shadow-branch sync                        |
+| `Lynvo: Sync Team Board`            | Runs a manual Shadow-branch sync                        |
 | `Lynvo: Connect GitHub`             | Stores your GitHub identity for authorship and presence |
 
 ---
