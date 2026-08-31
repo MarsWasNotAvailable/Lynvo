@@ -16,6 +16,7 @@ import {
   LynvoTombstone,
 } from "../types";
 import { AuthProvider } from "./AuthProvider";
+import { t } from "../l10n";
 
 type BoardMetadata = {
   version: string;
@@ -363,7 +364,7 @@ export class DataManager {
     } catch (error) {
       console.error("Lynvo: error loading modular board", error);
       vscode.window.showWarningMessage(
-        "Lynvo no pudo leer la persistencia modular. Revisa .vscode/lynvo.",
+        t("Lynvo could not read the modular persistence. Check .vscode/lynvo."),
       );
       return null;
     }
@@ -379,7 +380,7 @@ export class DataManager {
     } catch (error) {
       console.error("Lynvo: error loading legacy board", error);
       vscode.window.showWarningMessage(
-        "Lynvo could not read .vscode/lynvo.json. The file might be corrupted.",
+        t("Lynvo could not read .vscode/lynvo.json. The file might be corrupted."),
       );
       return null;
     }
@@ -1005,7 +1006,7 @@ export class DataManager {
       const columnsCount = Object.keys(board.columns).length;
       if (columnsCount <= 1) {
         vscode.window.showWarningMessage(
-          "You can not delete the last column in the table.",
+          t("You can not delete the last column in the table."),
         );
         return;
       }

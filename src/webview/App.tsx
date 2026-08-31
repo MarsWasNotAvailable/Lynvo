@@ -1,5 +1,6 @@
 import * as React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { t } from "./i18n";
 import {
   LynvoActivity,
   LynvoBoard,
@@ -201,10 +202,10 @@ const priorityColors: Record<Priority, string> = {
 };
 
 const relationLabels: Record<LynvoTaskRelationType, string> = {
-  blocks: "Blocks",
-  "blocked-by": "Blocked by",
-  related: "Related",
-  duplicates: "Duplicates",
+  blocks: t("Blocks"),
+  "blocked-by": t("Blocked by"),
+  related: t("Related"),
+  duplicates: t("Duplicates"),
 };
 
 const formatDateTime = (timestamp: number) => {
@@ -1598,7 +1599,7 @@ export const App: React.FC = () => {
               style={{ width: "100%", marginBottom: "8px", padding: "6px", boxSizing: "border-box" }}
             />
             <textarea
-              placeholder="Write a description of the task here"
+              placeholder={t("Write a description of the task here")}
               value={editDesc}
               onChange={(e) => setEditDesc(e.target.value)}
               rows={3}
@@ -1610,9 +1611,9 @@ export const App: React.FC = () => {
                 onChange={(e) => setEditPriority(e.target.value as Priority)}
                 style={{ flex: 1, padding: "6px" }}
               >
-                <option value="low">Low Priority</option>
-                <option value="medium">Medium Priority</option>
-                <option value="high">High Priority</option>
+                <option value="low">{t("Low Priority")}</option>
+                <option value="medium">{t("Medium Priority")}</option>
+                <option value="high">{t("High Priority")}</option>
               </select>
               <input
                 type="date"
@@ -1623,7 +1624,7 @@ export const App: React.FC = () => {
             </div>
             {renderLabelSelector(editLabelIds, setEditLabelIds)}
             <div style={{ borderTop: "1px solid var(--vscode-widget-border)", paddingTop: "8px", marginTop: "8px" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "6px" }}>Checklist</div>
+              <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "6px" }}>{t("Checklist")}</div>
               {(task.checklist || []).map((item) => (
                 <div key={item.id} style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "5px" }}>
                   <input
@@ -1666,7 +1667,7 @@ export const App: React.FC = () => {
               ))}
               <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
                 <input
-                  placeholder="Add checklist item..."
+                  placeholder={t("Add checklist item...")}
                   value={checklistDrafts[task.id] || ""}
                   onChange={(e) =>
                     setChecklistDrafts({
@@ -1679,11 +1680,11 @@ export const App: React.FC = () => {
                   }}
                   style={{ flex: 1, padding: "5px" }}
                 />
-                <button onClick={() => addChecklistItem(task.id)}>Add</button>
+                <button onClick={() => addChecklistItem(task.id)}>{t("Add")}</button>
               </div>
             </div>
             <div style={{ borderTop: "1px solid var(--vscode-widget-border)", paddingTop: "8px", marginTop: "8px" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "6px" }}>Relations</div>
+              <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "6px" }}>{t("Relations")}</div>
               {(task.relations || []).map((relation) => {
                 const target = boardData?.tasks[relation.targetTaskId];
                 return (
@@ -1692,7 +1693,7 @@ export const App: React.FC = () => {
                       {relationLabels[relation.type]}
                     </span>
                     <span style={{ flex: 1, fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {target?.title || "Missing task"}
+                      {target?.title || t("Missing task")}
                     </span>
                     <button
                       className="icon-btn delete"
@@ -1730,18 +1731,18 @@ export const App: React.FC = () => {
                   }
                   style={{ padding: "5px", minWidth: 0 }}
                 >
-                  <option value="">Select task...</option>
+                  <option value="">{t("Select task...")}</option>
                   {availableRelationTargets.map((candidate) => (
                     <option key={candidate.id} value={candidate.id}>
                       {candidate.title}
                     </option>
                   ))}
                 </select>
-                <button onClick={() => addTaskRelation(task.id)}>Link</button>
+                <button onClick={() => addTaskRelation(task.id)}>{t("Link")}</button>
               </div>
             </div>
             <div style={{ display: "flex", gap: "5px", justifyContent: "flex-end" }}>
-              <button onClick={() => setEditingTaskId(null)}>Cancel</button>
+              <button onClick={() => setEditingTaskId(null)}>{t("Cancel")}</button>
               <button
                 onClick={saveEditTask}
                 style={{
@@ -1751,7 +1752,7 @@ export const App: React.FC = () => {
                   padding: "4px 8px",
                 }}
               >
-                Save
+                {t("Save")}
               </button>
             </div>
           </div>
@@ -1769,8 +1770,8 @@ export const App: React.FC = () => {
                 {task.title}
               </h4>
               <div style={{ position: "absolute", top: "8px", right: "8px", display: "flex", gap: "2px" }}>
-	                <button className="icon-btn" onClick={() => startEditingTask(task)} title="Edit" aria-label="Edit" style={iconButtonStyle}><EditIcon /></button>
-                <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteTask", taskId: task.id })} title="Delete" aria-label="Delete" style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
+	                <button className="icon-btn" onClick={() => startEditingTask(task)} title={t("Edit")} aria-label={t("Edit")} style={iconButtonStyle}><EditIcon /></button>
+                <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteTask", taskId: task.id })} title={t("Delete")} aria-label={t("Delete")} style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
               </div>
             </div>
 
@@ -1809,7 +1810,7 @@ export const App: React.FC = () => {
                     color: "var(--vscode-descriptionForeground)",
                   }}
                 >
-                  {checklistProgress.done}/{checklistProgress.total} checks
+                  {t("{0}/{1} checks", checklistProgress.done, checklistProgress.total)}
                 </span>
               )}
               {(task.relations || []).length > 0 && (
@@ -1822,7 +1823,7 @@ export const App: React.FC = () => {
                     color: "var(--vscode-descriptionForeground)",
                   }}
                 >
-                  {(task.relations || []).length} links
+                  {t("{0} links", (task.relations || []).length)}
                 </span>
               )}
             </div>
@@ -1882,11 +1883,11 @@ export const App: React.FC = () => {
                     display: "inline-block",
                     color: "var(--vscode-button-secondaryForeground)",
                   }}
-                  title="Open in editor"
+                  title={t("Open in editor")}
                 >
                   {task.codeReference.filePath.split("/").pop()} ·{" "}
                   {task.codeReference.todoId
-                    ? "TODO"
+                    ? t("TODO")
                     : `L${task.codeReference.lineStart ?? "?"}`}
                 </div>
                 {task.codeReference.todoId && (
@@ -1906,9 +1907,9 @@ export const App: React.FC = () => {
                       padding: "2px 6px",
                       borderRadius: "3px",
                     }}
-                    title="Remove the TODO line from the code (the task stays on the board)"
+                    title={t("Remove the TODO line from the code (the task stays on the board)")}
                   >
-                    Remove line
+                    {t("Remove line")}
                   </button>
                 )}
               </div>
@@ -1929,7 +1930,7 @@ export const App: React.FC = () => {
             {checklistProgress.total > 0 && (
               <div style={{ marginBottom: "10px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "var(--vscode-descriptionForeground)", marginBottom: "4px" }}>
-                  <span>Checklist</span>
+                  <span>{t("Checklist")}</span>
                   <span>
                     {checklistProgress.done}/{checklistProgress.total}
                   </span>
@@ -1977,7 +1978,7 @@ export const App: React.FC = () => {
                 ))}
                 {(task.checklist || []).length > 3 && (
                   <div style={{ fontSize: "10px", color: "var(--vscode-descriptionForeground)" }}>
-                    +{(task.checklist || []).length - 3} more
+                    +{t("{0} more", (task.checklist || []).length - 3)}
                   </div>
                 )}
               </div>
@@ -2002,7 +2003,7 @@ export const App: React.FC = () => {
                     >
                       <span>{relationLabels[relation.type]}</span>
                       <span style={{ color: "var(--vscode-foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {target?.title || "Missing task"}
+                        {target?.title || t("Missing task")}
                       </span>
                     </div>
                   );
@@ -2032,11 +2033,11 @@ export const App: React.FC = () => {
 
   const renderLabelsManager = () => (
     <div style={{ padding: "20px", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", borderRadius: "8px" }}>
-      <h2>Manage Labels</h2>
+      <h2>{t("Manage Labels")}</h2>
       <div style={{ display: "flex", gap: "10px", marginBottom: "20px", alignItems: "center" }}>
         <input type="color" value={newLabelColor} onChange={(e) => setNewLabelColor(e.target.value)} />
         <input
-          placeholder="New label name..."
+          placeholder={t("New label name...")}
           value={newLabelName}
           onChange={(e) => setNewLabelName(e.target.value)}
           style={{ padding: "6px" }}
@@ -2049,7 +2050,7 @@ export const App: React.FC = () => {
           }}
           style={{ padding: "6px 12px", backgroundColor: "var(--vscode-button-background)", color: "white", border: "none", cursor: "pointer" }}
         >
-          Create Label
+          {t("Create Label")}
         </button>
       </div>
       <div>
@@ -2080,7 +2081,7 @@ export const App: React.FC = () => {
                 className="icon-btn delete"
                 onClick={() => vscode.postMessage({ command: "deleteLabel", labelId: label.id })}
               >
-	                Delete
+                {t("Delete")}
               </button>
             </div>
           ))}
@@ -2112,10 +2113,10 @@ export const App: React.FC = () => {
     return (
       <div style={{ display: "flex", gap: "20px", flexWrap: "wrap", overflowY: "auto" }}>
         <div style={{ flex: "1 1 100%", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "20px", borderRadius: "6px" }}>
-          <h2 style={{ marginTop: 0 }}>Project Progress</h2>
+          <h2 style={{ marginTop: 0 }}>{t("Project Progress")}</h2>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
             <span>
-              {metrics.completed} of {metrics.total} tasks completed
+              {t("{0} of {1} tasks completed", metrics.completed, metrics.total)}
             </span>
             <span style={{ fontWeight: "bold" }}>{metrics.completionRate}%</span>
           </div>
@@ -2131,7 +2132,7 @@ export const App: React.FC = () => {
         </div>
 
         <div style={{ flex: "1 1 320px", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "20px", borderRadius: "6px" }}>
-          <h3 style={{ marginTop: 0 }}>Status Breakdown</h3>
+          <h3 style={{ marginTop: 0 }}>{t("Status Breakdown")}</h3>
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {Object.entries(statusStats).map(([status, count]) => (
               <li key={status} style={{ padding: "8px 0", borderBottom: "1px solid var(--vscode-widget-border)" }}>
@@ -2142,20 +2143,20 @@ export const App: React.FC = () => {
         </div>
 
         <div style={{ flex: "1 1 320px", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "20px", borderRadius: "6px" }}>
-          <h3 style={{ marginTop: 0 }}>Risk Metrics</h3>
+          <h3 style={{ marginTop: 0 }}>{t("Risk Metrics")}</h3>
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
               <li style={{ padding: "8px 0", borderBottom: "1px solid var(--vscode-widget-border)" }}>
-                Overdue tasks: <strong>{metrics.overdue}</strong>
+                {t("Overdue tasks")}: <strong>{metrics.overdue}</strong>
               </li>
               <li style={{ padding: "8px 0", borderBottom: "1px solid var(--vscode-widget-border)" }}>
-                Stale (&gt;7 days): <strong>{metrics.stale}</strong>
+                {t("Stale (>7 days)")}: <strong>{metrics.stale}</strong>
               </li>
               <li style={{ padding: "8px 0" }}>
-                In progress: <strong>{metrics.inProgress}</strong>
+                {t("In progress")}: <strong>{metrics.inProgress}</strong>
               </li>
           </ul>
 
-          <h4 style={{ marginTop: "16px", marginBottom: "8px" }}>Priority Distribution</h4>
+          <h4 style={{ marginTop: "16px", marginBottom: "8px" }}>{t("Priority Distribution")}</h4>
           {(["high", "medium", "low"] as Priority[]).map((priority) => (
             <div key={priority} style={{ marginBottom: "8px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
@@ -2218,8 +2219,8 @@ export const App: React.FC = () => {
         <div className="lynvo-map-toolbar">
           <div style={{ color: "var(--vscode-descriptionForeground)", fontSize: "12px" }}>
             {isMapLinkMode && mapLinkSourceId
-              ? `Choose a target for "${boardData.tasks[mapLinkSourceId]?.title || "task"}".`
-              : "Drag tasks freely. Select a task to inspect it."}
+              ? t("Choose a target for {0}.", `"${boardData.tasks[mapLinkSourceId]?.title}"` || "task")
+              : t("Drag tasks freely. Select a task to inspect it.")}
           </div>
           <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
             <select
@@ -2233,7 +2234,7 @@ export const App: React.FC = () => {
               }}
               disabled={!isMapLinkMode || !mapLinkSourceId}
               style={{ padding: "5px 8px" }}
-              title="Relation type"
+              title={t("Relation type")}
             >
               {Object.entries(relationLabels).map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
@@ -2247,7 +2248,7 @@ export const App: React.FC = () => {
               }}
               disabled={!selectedMapTaskId && !mapLinkSourceId}
             >
-              Create link
+              {t("Create link")}
             </button>
             <button
               onClick={() => {
@@ -2256,17 +2257,17 @@ export const App: React.FC = () => {
               }}
               disabled={!isMapLinkMode}
             >
-              Cancel
+              {t("Cancel")}
             </button>
-            <div className="lynvo-map-controls" aria-label="Map zoom controls">
-              <button onClick={() => updateMapZoom(mapZoom - mapZoomStep)} title="Zoom out">
+            <div className="lynvo-map-controls" aria-label={t("Map zoom controls")}>
+              <button onClick={() => updateMapZoom(mapZoom - mapZoomStep)} title={t("Zoom out")}>
                 -
               </button>
               <span className="lynvo-map-zoom-value">{Math.round(mapZoom * 100)}%</span>
-              <button onClick={() => updateMapZoom(mapZoom + mapZoomStep)} title="Zoom in">
+              <button onClick={() => updateMapZoom(mapZoom + mapZoomStep)} title={t("Zoom in")}>
                 +
               </button>
-              <button onClick={() => updateMapZoom(1)} title="Reset zoom">
+              <button onClick={() => updateMapZoom(1)} title={t("Reset zoom")}>
                 1:1
               </button>
             </div>
@@ -2280,7 +2281,7 @@ export const App: React.FC = () => {
             onWheel={handleMapWheel}
             onKeyDown={handleMapKeyDown}
             onPointerDown={handleMapBackgroundPointerDown}
-            title="Drag the background to move. Use Ctrl/Cmd + wheel or +, -, 0 to zoom"
+            title={t("Drag the background to move. Use Ctrl/Cmd + wheel or +, -, 0 to zoom")}
           >
             {mapTasks.length > 0 ? (
               <div
@@ -2357,7 +2358,7 @@ export const App: React.FC = () => {
                           setActiveView("board");
                           startEditingTask(task);
                         }}
-                        title={`${task.title} · ${column?.title || "No column"} · ${priority}`}
+                        title={`${task.title} · ${column?.title || t("No column")} · ${priority}`}
                         style={{
                           left: `${position.x}px`,
                           top: `${position.y}px`,
@@ -2369,9 +2370,9 @@ export const App: React.FC = () => {
                         <span>
                           {task.title}
                           <small>
-                            {column?.title || "No column"}
+                            {column?.title || t("No column")}
                             {task.dueDate ? ` · ${new Date(task.dueDate).toLocaleDateString()}` : ""}
-                            {relationCount ? ` · ${relationCount} links` : ""}
+                            {relationCount ? ` · ${t("{0} links", relationCount)}` : ""}
                           </small>
                         </span>
                       </button>
@@ -2380,7 +2381,7 @@ export const App: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="lynvo-map-empty">No tasks match the current filters.</div>
+              <div className="lynvo-map-empty">{t("No tasks match the current filters.")}</div>
             )}
           </div>
           <aside className="lynvo-map-panel">
@@ -2388,7 +2389,7 @@ export const App: React.FC = () => {
               <>
                 <h3>{selectedTask.title}</h3>
                 <div style={{ color: "var(--vscode-descriptionForeground)", fontSize: "12px", marginBottom: "10px" }}>
-                  {selectedColumn?.title || "No column"} · {getTaskPriority(selectedTask)}
+                  {selectedColumn?.title || t("No column")} · {getTaskPriority(selectedTask)}
                   {selectedTask.dueDate ? ` · ${new Date(selectedTask.dueDate).toLocaleDateString()}` : ""}
                 </div>
                 <button
@@ -2398,7 +2399,7 @@ export const App: React.FC = () => {
                   }}
                   style={{ width: "100%", marginBottom: "10px" }}
                 >
-                  Create link from this task
+                  {t("Create link from this task")}
                 </button>
                 <button
                   onClick={() => {
@@ -2407,34 +2408,34 @@ export const App: React.FC = () => {
                   }}
                   style={{ width: "100%", marginBottom: "12px" }}
                 >
-                  Open task
+                  {t("Open task")}
                 </button>
-                <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "4px" }}>Relations</div>
+                <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "4px" }}>{t("Relations")}</div>
                 {selectedRelations.length > 0 ? selectedRelations.map((relation) => {
                   const target = boardData.tasks[relation.targetTaskId];
                   return (
                     <div className="lynvo-relation-row" key={relation.id}>
                       <div className="lynvo-relation-meta">
-                        <strong>{target?.title || "Missing task"}</strong>
+                        <strong>{target?.title || t("Missing task")}</strong>
                         <span style={{ color: "var(--vscode-descriptionForeground)" }}>{relationLabels[relation.type]}</span>
                       </div>
                       <button
                         className="lynvo-danger-button"
                         onClick={() => deleteTaskRelation(selectedTask.id, relation.id)}
                       >
-                        Delete
+                        {t("Delete")}
                       </button>
                     </div>
                   );
                 }) : (
                   <div style={{ color: "var(--vscode-descriptionForeground)", fontSize: "12px" }}>
-                    No relations yet.
+                    {t("No relations yet.")}
                   </div>
                 )}
               </>
             ) : (
               <div style={{ color: "var(--vscode-descriptionForeground)", fontSize: "12px" }}>
-                Select a task to inspect relations, open it, or start linking.
+                {t("Select a task to inspect relations, open it, or start linking.")}
               </div>
             )}
           </aside>
@@ -2452,18 +2453,18 @@ export const App: React.FC = () => {
 
     return (
       <div className="lynvo-table-shell">
-        <div className="lynvo-view-switcher" aria-label="Table view mode">
+        <div className="lynvo-view-switcher" aria-label={t("Table view mode")}>
           <button
             className={tableMode === "rows" ? "active" : ""}
             onClick={() => setTableMode("rows")}
           >
-            Rows
+            {t("Rows")}
           </button>
           <button
             className={tableMode === "map" ? "active" : ""}
             onClick={() => setTableMode("map")}
           >
-            Map
+            {t("Map")}
           </button>
         </div>
         {tableMode === "map" ? renderTaskMapView() : (
@@ -2471,7 +2472,7 @@ export const App: React.FC = () => {
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "980px" }}>
               <thead style={{ position: "sticky", top: 0, backgroundColor: "var(--vscode-editor-background)", zIndex: 2 }}>
                 <tr>
-                  {["Task", "Status", "Priority", "Due", "Checklist", "Relations", "Updated"].map((header) => (
+                  {[t("Task"), t("Status"), t("Priority"), t("Due"), t("Checklist"), t("Relations"), t("Updated")].map((header) => (
                     <th
                       key={header}
                       style={{
@@ -2511,7 +2512,7 @@ export const App: React.FC = () => {
                           {task.title}
                         </button>
                         <div style={{ fontSize: "11px", color: "var(--vscode-descriptionForeground)", marginTop: "4px", maxWidth: "360px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {task.description || "No description"}
+                          {task.description || t("No description")}
                         </div>
                       </td>
                       <td style={{ padding: "10px", verticalAlign: "top" }}>
@@ -2556,7 +2557,7 @@ export const App: React.FC = () => {
                 {sortedTableTasks.length === 0 && (
                   <tr>
                     <td colSpan={7} style={{ padding: "24px", color: "var(--vscode-descriptionForeground)", textAlign: "center" }}>
-                      No tasks match the current filters.
+                      {t("No tasks match the current filters.")}
                     </td>
                   </tr>
                 )}
@@ -2585,7 +2586,7 @@ export const App: React.FC = () => {
 	              onChange={(e) => setActivityTypeFilter(e.target.value)}
 	              style={{ padding: "5px", minWidth: "170px" }}
 	            >
-	              <option value="">All activity types</option>
+	              <option value="">{t("All activity types")}</option>
 	              {activityTypes.map((type) => (
 	                <option key={type} value={type}>
 	                  {type.replace(/_/g, " ")}
@@ -2597,7 +2598,7 @@ export const App: React.FC = () => {
 	              onChange={(e) => setActivityUserFilter(e.target.value)}
 	              style={{ padding: "5px", minWidth: "150px" }}
 	            >
-	              <option value="">All users</option>
+	              <option value="">{t("All users")}</option>
 	              {activityUsers.map((user) => (
 	                <option key={user} value={user}>
 	                  {user}
@@ -2611,18 +2612,18 @@ export const App: React.FC = () => {
 	                  setActivityUserFilter("");
 	                }}
 	              >
-	                Clear
+	                {t("Clear")}
 	              </button>
 	            )}
 	          </div>
 	        )}
 	        {activityItems.length === 0 ? (
 	          <div style={{ padding: "28px", textAlign: "center", color: "var(--vscode-descriptionForeground)" }}>
-	            No activity yet.
+	            {t("No activity yet.")}
 	          </div>
 	        ) : filteredActivityItems.length === 0 ? (
 	          <div style={{ padding: "28px", textAlign: "center", color: "var(--vscode-descriptionForeground)" }}>
-	            No activity matches the current filters.
+	            {t("No activity matches the current filters.")}
 	          </div>
 	        ) : (
 	          filteredActivityItems.map((item) => {
@@ -2673,7 +2674,7 @@ export const App: React.FC = () => {
     <div style={{ flex: 1, overflowY: "auto", border: "1px solid var(--vscode-widget-border)", borderRadius: "8px", backgroundColor: "var(--vscode-editor-background)" }}>
       {unresolvedConflicts.length === 0 ? (
         <div style={{ padding: "28px", textAlign: "center", color: "var(--vscode-descriptionForeground)" }}>
-          No unresolved conflicts.
+          {t("No unresolved conflicts.")}
         </div>
       ) : (
         unresolvedConflicts.map((conflict) => {
@@ -2684,7 +2685,7 @@ export const App: React.FC = () => {
                 <div>
                   <div style={{ fontWeight: 700 }}>{task?.title || conflict.entityId}</div>
                   <div style={{ fontSize: "11px", color: "var(--vscode-descriptionForeground)" }}>
-                    Field: {conflict.field}
+                    {t("Field")}: {conflict.field}
                   </div>
                 </div>
                 <div style={{ fontSize: "11px", color: "var(--vscode-descriptionForeground)" }}>
@@ -2693,11 +2694,11 @@ export const App: React.FC = () => {
 	              </div>
 	              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
 	                <div style={{ border: "1px solid var(--vscode-widget-border)", borderRadius: "6px", padding: "8px" }}>
-	                  <div style={{ fontSize: "10px", color: "var(--vscode-descriptionForeground)", marginBottom: "4px" }}>Local</div>
+	                  <div style={{ fontSize: "10px", color: "var(--vscode-descriptionForeground)", marginBottom: "4px" }}>{t("Local")}</div>
 	                  <div style={{ whiteSpace: "pre-wrap", fontSize: "12px" }}>{formatConflictValue(conflict.localValue)}</div>
 	                </div>
 	                <div style={{ border: "1px solid var(--vscode-widget-border)", borderRadius: "6px", padding: "8px" }}>
-	                  <div style={{ fontSize: "10px", color: "var(--vscode-descriptionForeground)", marginBottom: "4px" }}>Remote</div>
+	                  <div style={{ fontSize: "10px", color: "var(--vscode-descriptionForeground)", marginBottom: "4px" }}>{t("Remote")}</div>
 	                  <div style={{ whiteSpace: "pre-wrap", fontSize: "12px" }}>{formatConflictValue(conflict.remoteValue)}</div>
 	                </div>
 	              </div>
@@ -2712,7 +2713,7 @@ export const App: React.FC = () => {
                     })
                   }
                 >
-                  Keep Local
+                  {t("Keep Local")}
                 </button>
                 <button
                   onClick={() =>
@@ -2724,7 +2725,7 @@ export const App: React.FC = () => {
                   }
                   style={{ backgroundColor: "var(--vscode-button-background)", color: "white", border: "none" }}
                 >
-                  Use Remote
+                  {t("Use Remote")}
                 </button>
               </div>
             </div>
@@ -2739,21 +2740,21 @@ export const App: React.FC = () => {
       <style>{lynvoStyles}</style>
       <div className="lynvo-metrics">
         <div className="lynvo-stat">
-          <div className="lynvo-stat-label">Total tasks</div>
+          <div className="lynvo-stat-label">{t("Total tasks")}</div>
           <div className="lynvo-stat-value">{metrics.total}</div>
         </div>
         <div className="lynvo-stat">
-          <div className="lynvo-stat-label">Completed</div>
+          <div className="lynvo-stat-label">{t("Completed")}</div>
           <div className="lynvo-stat-value">{metrics.completed}</div>
         </div>
         <div className="lynvo-stat">
-          <div className="lynvo-stat-label">Overdue</div>
+          <div className="lynvo-stat-label">{t("Overdue")}</div>
           <div className="lynvo-stat-value" style={{ color: metrics.overdue ? "#f85149" : "inherit" }}>
             {metrics.overdue}
           </div>
         </div>
         <div className="lynvo-stat">
-          <div className="lynvo-stat-label">Completion rate</div>
+          <div className="lynvo-stat-label">{t("Completion rate")}</div>
           <div className="lynvo-stat-value">{metrics.completionRate}%</div>
         </div>
       </div>
@@ -2765,12 +2766,12 @@ export const App: React.FC = () => {
             <span>Lynvo</span>
           </div>
           {([
-            { id: "board", label: "Board" },
-            { id: "table", label: "Table" },
-            { id: "activity", label: "Activity" },
-            { id: "conflicts", label: `Conflicts${unresolvedConflicts.length ? ` (${unresolvedConflicts.length})` : ""}` },
-            { id: "insights", label: "Insights" },
-            { id: "labels", label: "Labels" },
+            { id: "board", label: t("Board") },
+            { id: "table", label: t("Table") },
+            { id: "activity", label: t("Activity") },
+            { id: "conflicts", label: unresolvedConflicts.length ? `${t("Conflicts")} (${unresolvedConflicts.length})` : t("Conflicts") },
+            { id: "insights", label: t("Insights") },
+            { id: "labels", label: t("Labels") },
           ] as { id: LynvoView; label: string }[]).map((item) => (
             <button
               key={item.id}
@@ -2790,11 +2791,11 @@ export const App: React.FC = () => {
               fontWeight: "bold",
             }}
           >
-            {isSyncing ? "Syncing..." : "Sync Team"}
+            {isSyncing ? t("Syncing...") : t("Sync Team")}
           </button>
           {remotePending && (
             <span
-              title="Remote board updates are available. Click Sync Team to pull them."
+              title={t("Remote board updates are available. Click Sync Team to pull them.")}
               style={{
                 fontSize: "11px",
                 border: "1px solid var(--vscode-charts-yellow)",
@@ -2806,7 +2807,7 @@ export const App: React.FC = () => {
                 fontWeight: 700,
               }}
             >
-              Updates available
+              {t("Updates available")}
             </span>
           )}
           <span
@@ -2835,7 +2836,7 @@ export const App: React.FC = () => {
                 fontWeight: 700,
               }}
             >
-              {activeUsers.length} online
+              {t("{0} online", activeUsers.length)}
             </span>
           )}
         </div>
@@ -2843,9 +2844,9 @@ export const App: React.FC = () => {
         <div className="lynvo-actions">
           {(activeView === "board" || activeView === "table") && (
           <div className="lynvo-filters">
-            <input className="lynvo-search" placeholder="Search tasks..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+            <input className="lynvo-search" placeholder={t("Search tasks...")} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             <select value={activeFilterLabel} onChange={(e) => setActiveFilterLabel(e.target.value)} style={{ padding: "6px" }}>
-              <option value="">All labels</option>
+              <option value="">{t("All labels")}</option>
               {boardData?.labels &&
                 Object.values(boardData.labels).map((label) => (
                   <option key={label.id} value={label.id}>
@@ -2854,12 +2855,12 @@ export const App: React.FC = () => {
                 ))}
             </select>
             <select value={activePriorityFilter} onChange={(e) => setActivePriorityFilter(e.target.value)} style={{ padding: "6px" }}>
-              <option value="">All priorities</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
+              <option value="">{t("All priorities")}</option>
+              <option value="high">{t("High")}</option>
+              <option value="medium">{t("Medium")}</option>
+              <option value="low">{t("Low")}</option>
             </select>
-            {isFiltering && <span style={{ fontSize: "10px", color: "var(--vscode-editorWarning-foreground)" }}>Drag & Drop disabled</span>}
+            {isFiltering && <span style={{ fontSize: "10px", color: "var(--vscode-editorWarning-foreground)" }}>{t("Drag & Drop disabled")}</span>}
           </div>
           )}
         </div>
@@ -2891,10 +2892,10 @@ export const App: React.FC = () => {
                 {editingColId === col.id ? (
                   <div style={{ display: "flex", gap: "5px", marginBottom: "15px", alignItems: "center", backgroundColor: "var(--vscode-editor-background)", padding: "8px", borderRadius: "6px" }}>
                     <button className="icon-btn" onClick={() => moveColumn(col.id, "left")}>{"<"}</button>
-                    <input type="color" value={editColColor} onChange={(e) => setEditColColor(e.target.value)} title="Pick column color" />
+                    <input type="color" value={editColColor} onChange={(e) => setEditColColor(e.target.value)} title={t("Pick column color")} />
                     <input value={editColTitle} onChange={(e) => setEditColTitle(e.target.value)} style={{ flex: 1, padding: "4px", width: "100px" }} />
                     <button className="icon-btn" onClick={() => moveColumn(col.id, "right")}>{">"}</button>
-                    <button className="icon-btn" onClick={saveEditColumn} title="Save" aria-label="Save" style={iconButtonStyle}><SaveIcon /></button>
+                    <button className="icon-btn" onClick={saveEditColumn} title={t("Save")} aria-label={t("Save")} style={iconButtonStyle}><SaveIcon /></button>
                     <button className="icon-btn" onClick={() => setEditingColId(null)}>X</button>
                   </div>
                 ) : (
@@ -2904,8 +2905,8 @@ export const App: React.FC = () => {
 	                      <span className="lynvo-count">{columnTasks.length}</span>
 	                    </h3>
 	                    <div style={{ display: "flex", gap: "5px" }}>
-                      <button className="icon-btn" onClick={() => startEditingColumn(col)} title="Edit" aria-label="Edit" style={iconButtonStyle}><EditIcon /></button>
-                      <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteColumn", colId: col.id })} title="Delete" aria-label="Delete" style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
+                      <button className="icon-btn" onClick={() => startEditingColumn(col)} title={t("Edit")} aria-label={t("Edit")} style={iconButtonStyle}><EditIcon /></button>
+                      <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteColumn", colId: col.id })} title={t("Delete")} aria-label={t("Delete")} style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
                     </div>
                   </div>
                 )}
@@ -2923,9 +2924,7 @@ export const App: React.FC = () => {
                     }}
                   >
                     <div style={{ marginBottom: "6px" }}>
-                      <strong>{lingeringRefs}</strong> task
-                      {lingeringRefs > 1 ? "s" : ""} in this final column still link
-                      to a TODO in your code.
+                      {t("{0} task(s) in this column still link to a TODO in your code.", lingeringRefs)}
                     </div>
                     <button
                       onClick={() =>
@@ -2934,7 +2933,7 @@ export const App: React.FC = () => {
                           colId: col.id,
                         })
                       }
-                      title="Remove the whole TODO comment from your source files and unlink these tasks. The tasks stay on the board."
+                      title={t("Remove the whole TODO comment from your source files and unlink these tasks. The tasks stay on the board.")}
                       style={{
                         width: "100%",
                         padding: "5px",
@@ -2946,31 +2945,31 @@ export const App: React.FC = () => {
                         fontWeight: 600,
                       }}
                     >
-                      Remove TODO comments?
+                      {t("Remove TODO comments?")}
                     </button>
                   </div>
                 )}
 
                 {addingTaskColId === col.id ? (
                   <div style={{ marginBottom: "15px", padding: "10px", backgroundColor: "var(--vscode-editor-background)", borderRadius: "6px", border: "1px solid var(--vscode-focusBorder)" }}>
-                    <input autoFocus placeholder="Task title..." value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
-                    <textarea placeholder="Write a description of the task here" value={newTaskDesc} onChange={(e) => setNewTaskDesc(e.target.value)} rows={2} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
+                    <input autoFocus placeholder={t("Task title...")} value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
+                    <textarea placeholder={t("Write a description of the task here")} value={newTaskDesc} onChange={(e) => setNewTaskDesc(e.target.value)} rows={2} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
                     <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
                       <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value as Priority)} style={{ flex: 1, padding: "6px" }}>
-                        <option value="low">Low Priority</option>
-                        <option value="medium">Medium Priority</option>
-                        <option value="high">High Priority</option>
+                        <option value="low">{t("Low Priority")}</option>
+                        <option value="medium">{t("Medium Priority")}</option>
+                        <option value="high">{t("High Priority")}</option>
                       </select>
                       <input type="date" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} style={{ flex: 1, padding: "6px" }} />
                     </div>
                     {renderLabelSelector(newTaskLabels, setNewTaskLabels)}
                     <div style={{ display: "flex", gap: "5px" }}>
-                      <button onClick={() => setAddingTaskColId(null)} style={{ flex: 1 }}>Cancel</button>
-                      <button onClick={submitNewTask} style={{ flex: 1, backgroundColor: "var(--vscode-button-background)", color: "white", border: "none" }}>Save</button>
+                      <button onClick={() => setAddingTaskColId(null)} style={{ flex: 1 }}>{t("Cancel")}</button>
+                      <button onClick={submitNewTask} style={{ flex: 1, backgroundColor: "var(--vscode-button-background)", color: "white", border: "none" }}>{t("Save")}</button>
                     </div>
                   </div>
                 ) : (
-                  !isFiltering && <button onClick={() => openAddTaskForm(col.id)} style={{ width: "100%", padding: "6px", marginBottom: "15px", background: "transparent", border: "1px dashed var(--vscode-widget-border)", color: "var(--vscode-foreground)", cursor: "pointer", borderRadius: "4px" }}>+ Add Task here</button>
+                  !isFiltering && <button onClick={() => openAddTaskForm(col.id)} style={{ width: "100%", padding: "6px", marginBottom: "15px", background: "transparent", border: "1px dashed var(--vscode-widget-border)", color: "var(--vscode-foreground)", cursor: "pointer", borderRadius: "4px" }}>{t("+ Add Task here")}</button>
                 )}
 
                 {columnTasks.map(renderTaskCard)}
@@ -2983,15 +2982,15 @@ export const App: React.FC = () => {
               <div style={{ backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "15px", borderRadius: "8px" }}>
                 <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
                   <input type="color" value={newColColor} onChange={(e) => setNewColColor(e.target.value)} />
-                  <input autoFocus placeholder="Column Name" value={newColTitle} onChange={(e) => setNewColTitle(e.target.value)} style={{ flex: 1, padding: "4px" }} />
+                  <input autoFocus placeholder={t("Column Name")} value={newColTitle} onChange={(e) => setNewColTitle(e.target.value)} style={{ flex: 1, padding: "4px" }} />
                 </div>
                 <div style={{ display: "flex", gap: "5px" }}>
-                  <button onClick={() => setIsAddingColumn(false)} style={{ flex: 1 }}>Cancel</button>
-                  <button onClick={submitNewColumn} style={{ flex: 1, backgroundColor: "var(--vscode-button-background)", color: "white", border: "none" }}>Create</button>
+                  <button onClick={() => setIsAddingColumn(false)} style={{ flex: 1 }}>{t("Cancel")}</button>
+                  <button onClick={submitNewColumn} style={{ flex: 1, backgroundColor: "var(--vscode-button-background)", color: "white", border: "none" }}>{t("Create")}</button>
                 </div>
               </div>
             ) : (
-              <button onClick={() => setIsAddingColumn(true)} style={{ width: "100%", padding: "15px", background: "var(--vscode-button-secondaryBackground)", color: "var(--vscode-button-secondaryForeground)", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" }}>+ Add another column</button>
+              <button onClick={() => setIsAddingColumn(true)} style={{ width: "100%", padding: "15px", background: "var(--vscode-button-secondaryBackground)", color: "var(--vscode-button-secondaryForeground)", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" }}>{t("+ Add another column")}</button>
             )}
           </div>
         </div>

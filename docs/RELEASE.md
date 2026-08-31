@@ -42,6 +42,28 @@ Install the generated VSIX in a clean VS Code window and validate:
 - `Lynvo: Sync Team Board` writes only to `lynvo-sync`.
 - The active Git branch is unchanged after sync.
 
+## Manual Localization Test
+
+You need to download the Display languages.
+They are available on the Extension marketplace (including OpenVSX).
+Or from the `>Configure Display Language` command.
+
+```bash
+# You can simply run a temporary instance
+# of code (or codium) with a specified locale
+# Running code again will revert to the set language.
+# NOTE : I could not run this with a concurrent code instance
+code . --locale=es
+
+# If you fancy isolating a bit further
+# You can install the extension into a temporary folder
+# in order to not tarnish your current setup
+# and run the vscode instance with it
+# NOTE : I could not merge those two command line, it would only install the extension
+codium . --install-extension lynvo-1.0.1.vsix --extensions-dir=/tmp/lynvo-vscodium-test/es
+codium . --locale=es --extensions-dir=/tmp/lynvo-vscodium-test/es
+```
+
 ## GitHub Repository Hygiene
 
 - Do not commit `node_modules/`.

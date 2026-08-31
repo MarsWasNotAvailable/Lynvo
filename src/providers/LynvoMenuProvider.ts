@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { t } from "../l10n";
 
 interface MenuItem {
   label: string;
@@ -14,67 +15,67 @@ export class LynvoMenuProvider
     {
       label: "Open Board",
       command: "lynvo.openBoard",
-      tooltip: "Open the main Kanban board",
+      tooltip: t("Open the main Kanban board"),
       icon: "project",
     },
     {
       label: "Open Insights",
       command: "lynvo.openInsights",
-      tooltip: "Show project metrics",
+      tooltip: t("Show project metrics"),
       icon: "graph",
     },
     {
       label: "Open Table",
       command: "lynvo.openTable",
-      tooltip: "Open the table view of the tasks",
+      tooltip: t("Open the table view of the tasks"),
       icon: "table",
     },
     {
       label: "Open Activity",
       command: "lynvo.openActivity",
-      tooltip: "Show the previous activities of the team",
+      tooltip: t("Show the previous activities of the team"),
       icon: "history",
     },
     {
       label: "Open Conflicts",
       command: "lynvo.openConflicts",
-      tooltip: "Show pending conflicts of synchonization",
+      tooltip: t("Show pending conflicts of synchronization"),
       icon: "warning",
     },
     {
       label: "Manage Labels",
       command: "lynvo.openLabels",
-      tooltip: "Administra etiquetas del tablero",
+      tooltip: t("Manage the board's labels"),
       icon: "tag",
     },
     {
       label: "New Task",
       command: "lynvo.quickCreateTask",
-      tooltip: "Create a new quick task",
+      tooltip: t("Create a new quick task"),
       icon: "add",
     },
     {
       label: "Promote TODO to Task",
       command: "lynvo.promoteTodo",
-      tooltip: "Promote the selected comments marked with TODO/IDEA/FIXME as tasks",
+      tooltip: t("Promote the selected comments marked with TODO/IDEA/FIXME as tasks"),
       icon: "code",
     },
     {
       label: "Sync Team Board",
       command: "lynvo.syncBoard",
-      tooltip: "Synchronize Lynvo with the remote lynvo-sync branch",
+      tooltip: t("Synchronize Lynvo with the remote lynvo-sync branch"),
       icon: "sync",
     },
     {
       label: "Connect GitHub",
       command: "lynvo.connectGitHub",
-      tooltip: "Connect your locally assigned identity with your GitHub account",
+      tooltip: t("Connect your locally assigned identity with your GitHub account"),
       icon: "github",
     },
     {
       label: "Install Agent Skills",
       command: "lynvo.installSkills",
-      tooltip: "Install the Skill.MD file for coding agents (OpenCode, Claude Code, Cline, Cursor, or others)",
+      tooltip: t("Install the Skill.MD file for coding agents (OpenCode, Claude Code, Cline, Cursor, or others)"),
       icon: "robot",
     },
   ];

@@ -14,6 +14,7 @@ import {
   lineHasMarker,
   TODO_KEYWORDS,
 } from "./providers/TodoTracker";
+import { initL10n, t } from "./l10n";
 
 function selectionContainsTodo(editor: vscode.TextEditor | undefined): boolean {
   if (!editor || editor.selection.isEmpty) {
@@ -41,7 +42,7 @@ async function createTask(
    codeRef?: CodeReference
 ): Promise<void> {
    await DataManager.createTask(title.trim(), description, columnId, [], codeRef);
-   vscode.window.showInformationMessage("Task created in Lynvo.");
+   vscode.window.showInformationMessage(t("Task created in Lynvo."));
    LynvoPanel.refreshData();
    GitService.scheduleBoardSync();
 }
@@ -54,17 +55,17 @@ async function createTask(
 async function promoteTodo(): Promise<void> {
    const editor = vscode.window.activeTextEditor;
    if (!editor) {
-     vscode.window.showErrorMessage("No file is currently open.");
+     vscode.window.showErrorMessage(t("No file is currently open."));
      return;
    }
    if (!vscode.workspace.getWorkspaceFolder(editor.document.uri)) {
      vscode.window.showErrorMessage(
-       "Lynvo can only promote TODOs in files inside the workspace.",
+       t("Lynvo can only promote TODOs in files inside the workspace."),
      );
      return;
    }
    if (editor.selection.isEmpty) {
-     vscode.window.showErrorMessage("Select one or more TODO lines first.");
+     vscode.window.showErrorMessage(t("Select one or more TODO lines first."));
      return;
    }
 
@@ -82,7 +83,7 @@ async function promoteTodo(): Promise<void> {
 
    if (candidates.length === 0) {
      vscode.window.showErrorMessage(
-       `No ${TODO_KEYWORDS.join("/")} comment found in the selection.`,
+       t("No {0} comment found in the selection.", TODO_KEYWORDS.join("/")),
      );
      return;
    }
@@ -90,7 +91,7 @@ async function promoteTodo(): Promise<void> {
    const alreadyTracked = candidates.filter((candidate) => lineHasMarker(candidate.text));
    if (alreadyTracked.length > 0) {
      vscode.window.showErrorMessage(
-       "Selection already contains Lynvo-tracked TODO(s). Use 'Lynvo: Remove tracking' first.",
+       t("Selection already contains Lynvo-tracked TODO(s). Use 'Lynvo: Remove tracking' first."),
      );
      return;
    }
@@ -116,7 +117,7 @@ async function promoteTodo(): Promise<void> {
    }
    const applied = await vscode.workspace.applyEdit(edit);
    if (!applied) {
-     vscode.window.showErrorMessage("Lynvo could not update the file.");
+     vscode.window.showErrorMessage(t("Lynvo could not update the file."));
      return;
    }
    await new Promise<void>((resolve) => {
@@ -139,9 +140,7 @@ async function promoteTodo(): Promise<void> {
 
    const count = prepared.length;
    vscode.window.showInformationMessage(
-     count === 1
-       ? "1 TODO promoted to a Lynvo task."
-       : `${count} TODOs promoted to Lynvo tasks.`,
+     t("{0} TODO(s) promoted to Lynvo tasks.", count)
    );
    LynvoPanel.refreshData();
    GitService.scheduleBoardSync();
@@ -151,22 +150,22 @@ async function quickCreateTask(): Promise<void> {
    const board = await DataManager.loadBoard();
    if (!board) {
      vscode.window.showWarningMessage(
-       "Lynvo board not found. Open a project folder first.",
+       t("Lynvo board not found. Open a project folder first."),
      );
      return;
    }
 
    const title = await vscode.window.showInputBox({
-     prompt: "Task title",
+     prompt: t("Task title"),
      validateInput: (value) =>
-       value.trim().length === 0 ? "Title cannot be empty." : null,
+       value.trim().length === 0 ? t("Title cannot be empty.") : null,
    });
    if (!title) {return;}
 
    const description =
      (await vscode.window.showInputBox({
-       prompt: "Description (optional)",
-       placeHolder: "Brief context for the task...",
+       prompt: t("Description (optional)"),
+       placeHolder: t("Brief context for the task..."),
      })) || "";
 
    const sortedColumns = Object.values(board.columns).sort(
@@ -180,8 +179,8 @@ async function quickCreateTask(): Promise<void> {
        columnId: column.id,
      })),
      {
-       title: "Select initial column",
-       placeHolder: "Which column should the task start in?",
+       title: t("Select initial column"),
+       placeHolder: t("Which column should the task start in?"),
      },
    );
 
@@ -191,6 +190,9 @@ async function quickCreateTask(): Promise<void> {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  // Load the l10n bundle first so every user-facing string resolves to the
+  // active VS Code language (falls back to English if the bundle is missing).
+  initL10n();
   const lynvoMenuProvider = new LynvoMenuProvider();
   const treeDataRegistration = vscode.window.registerTreeDataProvider(
     "lynvo.sidebarMenu",
@@ -270,11 +272,12 @@ export function activate(context: vscode.ExtensionContext) {
       GitService.setRemotePending(false);
       await LynvoPanel.refreshData();
       if (result.hasConflicts) {
+        const openConflicts = t("Open conflicts");
         vscode.window.showWarningMessage(
-          "Lynvo detected sync conflicts. Open the Conflict Center to resolve them.",
-          "Open conflicts",
+          t("Lynvo detected sync conflicts. Open the Conflict Center to resolve them."),
+          openConflicts,
         ).then((action) => {
-          if (action === "Open conflicts") {
+          if (action === openConflicts) {
             LynvoPanel.render(context.extensionUri, "conflicts");
           }
         });
@@ -282,7 +285,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
       if (result.remoteChanged) {
         vscode.window.showInformationMessage(
-          "Lynvo detected team changes and updated the board.",
+          t("Lynvo detected team changes and updated the board."),
         );
       }
     } else {
@@ -306,7 +309,7 @@ export function activate(context: vscode.ExtensionContext) {
       const user = await AuthProvider.getGitHubUser({ createIfNone: true });
       if (user) {
         await DataManager.touchCurrentUser();
-        vscode.window.showInformationMessage(`Connected as: ${user.username}`);
+        vscode.window.showInformationMessage(t("Connected as: {0}", user.username));
       }
     }),
   );
@@ -353,11 +356,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("lynvo.syncBoard", async () => {
       const result = await GitService.syncBoard();
       if (result.success && result.hasConflicts) {
+        const openConflicts = t("Open conflicts");
         const action = await vscode.window.showWarningMessage(
-          "Lynvo synced the board, but there are conflicts to resolve.",
-          "Open conflicts",
+          t("Lynvo synced the board, but there are conflicts to resolve."),
+          openConflicts,
         );
-        if (action === "Open conflicts") {
+        if (action === openConflicts) {
           LynvoPanel.render(context.extensionUri, "conflicts");
         }
       } else if (result.success) {
@@ -386,7 +390,7 @@ export function activate(context: vscode.ExtensionContext) {
       const result = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: "Lynvo: Installing agent skills...",
+          title: t("Lynvo: Installing agent skills..."),
           cancellable: false,
         },
         () => SkillInstaller.installAll(context.extensionUri, context, { force: true }),
@@ -394,17 +398,17 @@ export function activate(context: vscode.ExtensionContext) {
 
       const messages: string[] = [];
       if (result.installed.length > 0) {
-        messages.push(`Installed: ${result.installed.length} location(s)`);
+        messages.push(t("Installed: {0} location(s)", result.installed.length));
       }
       if (result.skipped.length > 0) {
-        messages.push(`Skipped: ${result.skipped.length} location(s)`);
+        messages.push(t("Skipped: {0} location(s)", result.skipped.length));
       }
       if (result.errors.length > 0) {
-        messages.push(`Errors: ${result.errors.join("; ")}`);
+        messages.push(t("Errors: {0}", result.errors.join("; ")));
       }
 
       if (messages.length === 0) {
-        vscode.window.showInformationMessage("Lynvo skills are already up to date.");
+        vscode.window.showInformationMessage(t("Lynvo skills are already up to date."));
       } else {
         const detail = messages.join("\n");
         if (result.errors.length > 0) {

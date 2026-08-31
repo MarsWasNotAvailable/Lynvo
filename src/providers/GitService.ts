@@ -4,6 +4,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { DataManager } from "./DataManager";
+import { t } from "../l10n";
 import {
   LynvoActivity,
   LynvoBoard,
@@ -60,7 +61,7 @@ export class GitService {
     "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
   private static syncQueue: Promise<LynvoSyncResult> = Promise.resolve({
     success: true,
-    message: "Sincronización pendiente.",
+    message: t("Sync pending."),
   });
   private static scheduledSync: NodeJS.Timeout | undefined;
   private static remotePending = false;
@@ -510,7 +511,7 @@ export class GitService {
       if (!workspacePath) {
       return {
         success: false,
-        message: "Workspace not found.",
+        message: t("Workspace not found."),
         hasConflicts: false,
       };
     }
@@ -539,7 +540,7 @@ export class GitService {
       if (!localBoard) {
         return {
           success: false,
-          message: "No local board to sync.",
+          message: t("No local board to sync."),
           remoteChanged: false,
           hasConflicts: false,
         };
@@ -629,8 +630,10 @@ export class GitService {
         }).catch(() => {});
         return {
           success: false,
-          message:
-            `Lynvo could save the changes locally, but not push to the remote lynvo-sync branch. ${detail}`,
+          message: t(
+            "Lynvo could save the changes locally, but not push to the remote lynvo-sync branch. {0}",
+            detail,
+          ),
           remoteChanged: false,
           hasConflicts: false,
         };
@@ -649,7 +652,7 @@ export class GitService {
 
       return {
         success: true,
-        message: "Lynvo synced the board on the technical branch lynvo-sync.",
+        message: t("Lynvo synced the board on the technical branch lynvo-sync."),
         remoteChanged: Boolean(
           previousRemoteCommit &&
             fetchedRemoteCommit &&
@@ -666,7 +669,7 @@ export class GitService {
       }).catch(() => {});
       return {
         success: false,
-        message: `Lynvo could not synchronize (${stage}). ${detail}`,
+        message: t("Lynvo could not synchronize ({0}). {1}", stage, detail),
         remoteChanged: false,
         hasConflicts: false,
       };

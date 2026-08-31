@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { LynvoUser } from "../types";
+import { t } from "../l10n";
 
 interface GitHubUserOptions {
   createIfNone?: boolean;
@@ -28,7 +29,7 @@ export class AuthProvider {
       console.error("Lynvo: Error authenticating with GitHub", error);
       if (createIfNone) {
         vscode.window.showErrorMessage(
-          "Lynvo: You must sign in to GitHub to view the changes.",
+          t("Lynvo: You must sign in to GitHub to view the changes."),
         );
       }
     }

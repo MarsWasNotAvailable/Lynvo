@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { DataManager } from "./DataManager";
 import { GitService } from "./GitService";
+import { getWebviewBundle, t } from "../l10n";
 import { LynvoTaskRelationType } from "../types";
 import {
   findMarkerLineIndex,
@@ -168,7 +169,7 @@ export class LynvoPanel {
     } else {
       const panel = vscode.window.createWebviewPanel(
         "lynvoBoard",
-        "Lynvo - Project Board",
+        t("Lynvo - Project Board"),
         vscode.ViewColumn.One,
         {
           enableScripts: true,
@@ -299,14 +300,15 @@ export class LynvoPanel {
             const hasMarker = Boolean(
               todoId && filePath && isSafeWorkspaceRelativePath(filePath),
             );
+            const deleteLabel = t("Delete");
             const confirmTask = await vscode.window.showWarningMessage(
               hasMarker
-                ? "Delete task and remove its Lynvo marker from the file?"
-                : "Delete task?",
+                ? t("Delete task and remove its Lynvo marker from the file?")
+                : t("Delete task?"),
               { modal: true },
-              "Delete",
+              deleteLabel,
             );
-            if (confirmTask === "Delete") {
+            if (confirmTask === deleteLabel) {
               if (todoId && filePath && isSafeWorkspaceRelativePath(filePath)) {
                 // Demote: strip the marker token but keep the comment line itself.
                 await removeMarkerFromFile(filePath, todoId);
@@ -347,12 +349,13 @@ export class LynvoPanel {
             if (!colId) {
               return;
             }
+            const deleteLabel = t("Delete");
             const confirmCol = await vscode.window.showWarningMessage(
-              "Delete column? ALL TASKS inside will be deleted.",
+              t("Delete column? ALL TASKS inside will be deleted."),
               { modal: true },
-              "Delete",
+              deleteLabel,
             );
-            if (confirmCol === "Delete") {
+            if (confirmCol === deleteLabel) {
               await DataManager.deleteColumn(colId);
               LynvoPanel.refreshDataAndScheduleSync();
             }
@@ -461,11 +464,12 @@ export class LynvoPanel {
             // A sync pulls the remote state, so there are no more pending updates.
             GitService.setRemotePending(false);
             if (result.success && result.hasConflicts) {
+              const openConflicts = t("Open conflicts");
               const action = await vscode.window.showWarningMessage(
-                "Lynvo has synchronized the dashboard, but there are still conflicts to resolve.",
-                "Open conflicts",
+                t("Lynvo has synchronized the dashboard, but there are still conflicts to resolve."),
+                openConflicts,
               );
-              if (action === "Open conflicts") {
+              if (action === openConflicts) {
                 this._panel.webview.postMessage({
                   command: "switchView",
                   view: "conflicts",
@@ -502,7 +506,7 @@ export class LynvoPanel {
             }
             if (lineNumber === undefined) {
               vscode.window.showWarningMessage(
-                "Lynvo could not locate the linked line in the file.",
+                t("Lynvo could not locate the linked line in the file."),
               );
               return;
             }
@@ -532,29 +536,30 @@ export class LynvoPanel {
             const filePath = task?.codeReference?.filePath;
             if (!todoId || !filePath || !isSafeWorkspaceRelativePath(filePath)) {
               vscode.window.showWarningMessage(
-                "This task is not linked to a Lynvo TODO marker.",
+                t("This task is not linked to a Lynvo TODO marker."),
               );
               return;
             }
+            const removeLabel = t("Remove");
             const confirm = await vscode.window.showWarningMessage(
-              `Remove the TODO line from ${filePath}? The task stays on the board.`,
+              t("Remove the TODO line from {0}? The task stays on the board.", filePath),
               { modal: true },
-              "Remove",
+              removeLabel,
             );
-            if (confirm !== "Remove") {
+            if (confirm !== removeLabel) {
               return;
             }
             const deleted = await removeTodoCommentFromFile(filePath, todoId);
             if (!deleted) {
               vscode.window.showErrorMessage(
-                "Could not find the Lynvo TODO marker in the file.",
+                t("Could not find the Lynvo TODO marker in the file."),
               );
               return;
             }
             // Keep the task on the board; just drop its code link so it stays tracked but untracked in code.
             await DataManager.clearTaskCodeReference(taskId);
             vscode.window.showInformationMessage(
-              "TODO line removed. Task kept on the board.",
+              t("TODO line removed. Task kept on the board."),
             );
             LynvoPanel.refreshDataAndScheduleSync();
             return;
@@ -583,18 +588,20 @@ export class LynvoPanel {
               }));
             if (targets.length === 0) {
               vscode.window.showInformationMessage(
-                "No TODO comments to remove in this column.",
+                t("No TODO comments to remove in this column."),
               );
               return;
             }
+            const removeComments = t("Remove comments");
             const confirm = await vscode.window.showWarningMessage(
-              `Remove the TODO comments for ${targets.length} task${
-                targets.length > 1 ? "s" : ""
-              } in this final column? This deletes the whole TODO comment from your source files (the tasks stay on the board).`,
+              t(
+                "Remove the related TODO comments from code for the {0} task(s) listed in this column?",
+                targets.length,
+              ),
               { modal: true },
-              "Remove comments",
+              removeComments,
             );
-            if (confirm !== "Remove comments") {
+            if (confirm !== removeComments) {
               return;
             }
             let removed = 0;
@@ -610,10 +617,8 @@ export class LynvoPanel {
             }
             vscode.window.showInformationMessage(
               removed === targets.length
-                ? `${removed} TODO comment${
-                    removed > 1 ? "s" : ""
-                  } removed from your code. Tasks kept on the board.`
-                : `Removed ${removed} of ${targets.length} TODO comments. Some were already gone from the file.`,
+                ? t("{0} TODO comment(s) removed from your code. Tasks kept on the board.", removed)
+                : t("Removed {0} of {1} TODO comments. Some were already gone from the file.", removed, targets.length),
             );
             LynvoPanel.refreshDataAndScheduleSync();
             return;
@@ -633,6 +638,9 @@ export class LynvoPanel {
       vscode.Uri.joinPath(extensionUri, "dist", "webview.js"),
     );
     const nonce = getNonce();
+    // Seed the webview with the merged l10n bundle (English base + locale).
+    // The `<` escape keeps the JSON safe inside the inline <script> tag.
+    const bundle = JSON.stringify(getWebviewBundle()).replace(/</g, "\\u003c");
     const csp = [
       "default-src 'none'",
       `script-src 'nonce-${nonce}'`,
@@ -650,7 +658,7 @@ export class LynvoPanel {
             input[type="color"] { -webkit-appearance: none; border: none; width: 25px; height: 25px; cursor: pointer; padding: 0; background: transparent; }
             input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
             input[type="color"]::-webkit-color-swatch { border: 1px solid var(--vscode-widget-border); border-radius: 4px; }
-        </style></head><body><div id="root"></div><script nonce="${nonce}" src="${scriptUri}"></script></body></html>`;
+        </style></head><body><div id="root"></div><script nonce="${nonce}">window.__LYNVO_I18N__ = ${bundle};</script><script nonce="${nonce}" src="${scriptUri}"></script></body></html>`;
   }
 }
 
