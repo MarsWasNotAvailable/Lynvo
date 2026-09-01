@@ -52,6 +52,7 @@ export type LynvoActivityType =
   | "task_updated"
   | "task_moved"
   | "task_deleted"
+  | "link_removed"
   | "column_created"
   | "column_updated"
   | "column_deleted"
@@ -59,6 +60,7 @@ export type LynvoActivityType =
   | "label_deleted"
   | "checklist_added"
   | "checklist_updated"
+  | "checklist_completed"
   | "checklist_deleted"
   | "relation_added"
   | "relation_deleted";

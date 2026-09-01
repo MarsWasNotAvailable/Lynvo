@@ -204,6 +204,22 @@ export class LynvoPanel {
     }
   }
 
+  /**
+   * Re-seed the open webview with the recently-switched l10n bundle
+   * to render the UI with the selected display language.
+   */
+  public static applyLanguage(): void {
+    if (LynvoPanel.currentPanel) {
+      // Keep the panel tab title in the active language (t() already re-pointed
+      // to the new bundle by setLanguage()).
+      LynvoPanel.currentPanel._panel.title = t("Lynvo - Project Board");
+      LynvoPanel.currentPanel._panel.webview.postMessage({
+        command: "setLanguage",
+        bundle: getWebviewBundle(),
+      });
+    }
+  }
+
   private static async refreshDataAndScheduleSync() {
     await LynvoPanel.refreshData();
     GitService.scheduleBoardSync(15000, (result) => {

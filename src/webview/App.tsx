@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { t } from "./i18n";
+import { setWebviewLanguage, t } from "./i18n";
+import type { l10nJsonFormat } from "@vscode/l10n";
 import {
   LynvoActivity,
   LynvoBoard,
@@ -164,7 +165,8 @@ const clampMapZoom = (value: number): number =>
 type WebviewInboundMessage =
   | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean }
   | { command: "setRemotePending"; pending: boolean }
-  | { command: "switchView"; view: LynvoView };
+  | { command: "switchView"; view: LynvoView }
+  | { command: "setLanguage"; bundle: l10nJsonFormat };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -192,6 +194,9 @@ const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
   if (value.command === "switchView" && isLynvoView(value.view)) {
     return { command: "switchView", view: value.view };
   }
+  if (value.command === "setLanguage" && isRecord(value.bundle)) {
+    return { command: "setLanguage", bundle: value.bundle as l10nJsonFormat };
+  }
   return null;
 };
 
@@ -201,12 +206,6 @@ const priorityColors: Record<Priority, string> = {
   high: "#f85149",
 };
 
-const relationLabels: Record<LynvoTaskRelationType, string> = {
-  blocks: t("Blocks"),
-  "blocked-by": t("Blocked by"),
-  related: t("Related"),
-  duplicates: t("Duplicates"),
-};
 
 const formatDateTime = (timestamp: number) => {
   const date = new Date(timestamp);
@@ -934,6 +933,18 @@ const lynvoStyles = `
 
 export const App: React.FC = () => {
   const [boardData, setBoardData] = useState<LynvoBoard | null>(null);
+  // A runtime language-switch to re-renders the whole view
+  // with the new bundle (including the relationLabels memo below).
+  const [langVersion, setLangVersion] = useState(0);
+  const relationLabels = useMemo<Record<LynvoTaskRelationType, string>>(
+    () => ({
+      blocks: t("Blocks"),
+      "blocked-by": t("Blocked by"),
+      related: t("Related"),
+      duplicates: t("Duplicates"),
+    }),
+    [langVersion],
+  );
   const [activeView, setActiveView] = useState<LynvoView>("board");
   const [tableMode, setTableMode] = useState<TableMode>("rows");
   const [mapLinkSourceId, setMapLinkSourceId] = useState<string | null>(null);
@@ -1013,6 +1024,11 @@ export const App: React.FC = () => {
 
       if (message.command === "switchView") {
         setActiveView(message.view);
+      }
+
+      if (message.command === "setLanguage") {
+        setWebviewLanguage(message.bundle);
+        setLangVersion((version) => version + 1);
       }
     };
 
@@ -2571,8 +2587,8 @@ export const App: React.FC = () => {
 
   const renderActivityView = () => {
     const getActivityColor = (type: LynvoActivity["type"]) => {
-      if (type.includes("deleted")) {return "#f85149";}
-      if (type.includes("created") || type.includes("added")) {return "#3fb950";}
+      if (type.includes("deleted") || type.includes("removed")) {return "#f85149";}
+      if (type.includes("created") || type.includes("added") || type.includes("completed")) {return "#3fb950";}
       if (type.includes("moved")) {return "#58a6ff";}
       return "var(--vscode-descriptionForeground)";
     };
@@ -2589,7 +2605,7 @@ export const App: React.FC = () => {
 	              <option value="">{t("All activity types")}</option>
 	              {activityTypes.map((type) => (
 	                <option key={type} value={type}>
-	                  {type.replace(/_/g, " ")}
+	                  {t(type)}
 	                </option>
 	              ))}
 	            </select>
@@ -2627,36 +2643,39 @@ export const App: React.FC = () => {
 	          </div>
 	        ) : (
 	          filteredActivityItems.map((item) => {
-            const task = item.taskId ? boardData?.tasks[item.taskId] : undefined;
+            const color = getActivityColor(item.type);
             return (
               <div
                 key={item.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "12px 1fr auto",
+                  gridTemplateColumns: "1fr auto",
                   gap: "12px",
                   padding: "12px 14px",
                   borderBottom: "1px solid var(--vscode-widget-border)",
                   alignItems: "start",
                 }}
               >
-                <span
-                  style={{
-                    width: "8px",
-                    height: "8px",
-                    borderRadius: "999px",
-                    backgroundColor: getActivityColor(item.type),
-                    marginTop: "5px",
-                  }}
-                />
                 <div>
-                  <div style={{ fontSize: "13px", color: "var(--vscode-foreground)" }}>
-                    {item.message}
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", fontSize: "13px", color: "var(--vscode-foreground)" }}>
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        lineHeight: "16px",
+                        color,
+                        border: `1px solid ${color}`,
+                        borderRadius: "999px",
+                        padding: "1px 8px",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {t(item.type)}
+                    </span>
+                    <span>{item.message}</span>
                   </div>
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px", fontSize: "11px", color: "var(--vscode-descriptionForeground)" }}>
                     <span>{item.actor.username}</span>
-                    {task && <span>{task.title}</span>}
-                    <span>{item.type.replace(/_/g, " ")}</span>
                   </div>
                 </div>
                 <div style={{ fontSize: "11px", color: "var(--vscode-descriptionForeground)", whiteSpace: "nowrap" }}>

@@ -644,7 +644,7 @@ export class DataManager {
       this.addActivity(
         board,
         "task_moved",
-        `Moved "${board.tasks[taskId].title}" to ${board.columns[newStatus].title}`,
+        `"${board.tasks[taskId].title}" => ${board.columns[newStatus].title}`,
         user,
         {
           taskId,
@@ -675,7 +675,7 @@ export class DataManager {
           this.addActivity(
             board,
             "task_moved",
-            `Reordered "${board.tasks[upd.id].title}"`,
+            `"${board.tasks[upd.id].title}"`,
             user,
             {
               taskId: upd.id,
@@ -724,7 +724,7 @@ export class DataManager {
         priority,
         dueDate,
       };
-      this.addActivity(board, "task_created", `Created "${title}"`, user, {
+      this.addActivity(board, "task_created", `"${title}"`, user, {
         taskId,
       });
     });
@@ -750,7 +750,7 @@ export class DataManager {
       board.tasks[taskId].updatedAt = Date.now();
 
       if (user) {board.tasks[taskId].lastModifiedBy = user;}
-      this.addActivity(board, "task_updated", `Updated "${title}"`, user, {
+      this.addActivity(board, "task_updated", `"${title}"`, user, {
         taskId,
       });
     });
@@ -767,8 +767,8 @@ export class DataManager {
       if (user) {task.lastModifiedBy = user;}
       this.addActivity(
         board,
-        "task_updated",
-        `Removed code link from "${task.title}"`,
+        "link_removed",
+        `"${task.title}"`,
         user,
         { taskId },
       );
@@ -786,7 +786,7 @@ export class DataManager {
           (relation) => relation.targetTaskId !== taskId,
         );
       });
-      this.addActivity(board, "task_deleted", `Deleted "${taskTitle}"`, user, {
+      this.addActivity(board, "task_deleted", `"${taskTitle}"`, user, {
         taskId,
       });
     });
@@ -813,7 +813,7 @@ export class DataManager {
       task.checklist = [...(task.checklist || []), item];
       task.updatedAt = now;
       if (user) {task.lastModifiedBy = user;}
-      this.addActivity(board, "checklist_added", `Added checklist item to "${task.title}"`, user, {
+      this.addActivity(board, "checklist_added", `"${task.title}"`, user, {
         taskId,
       });
     });
@@ -841,10 +841,11 @@ export class DataManager {
       item.updatedAt = now;
       task.updatedAt = now;
       if (user) {task.lastModifiedBy = user;}
+      const isCompletion = updates.done === true;
       this.addActivity(
         board,
-        "checklist_updated",
-        `${item.done ? "Completed" : "Updated"} checklist item in "${task.title}"`,
+        isCompletion ? "checklist_completed" : "checklist_updated",
+        `"${task.title}"`,
         user,
         { taskId },
       );
@@ -863,7 +864,7 @@ export class DataManager {
       task.checklist = (task.checklist || []).filter((item) => item.id !== itemId);
       task.updatedAt = Date.now();
       if (user) {task.lastModifiedBy = user;}
-      this.addActivity(board, "checklist_deleted", `Removed checklist item from "${task.title}"`, user, {
+      this.addActivity(board, "checklist_deleted", `"${task.title}"`, user, {
         taskId,
       });
     });
@@ -899,7 +900,7 @@ export class DataManager {
       this.addActivity(
         board,
         "relation_added",
-        `Linked "${task.title}" to "${board.tasks[targetTaskId].title}"`,
+        `"${task.title}" => "${board.tasks[targetTaskId].title}"`,
         user,
         { taskId, targetTaskId, metadata: { type } },
       );
@@ -920,7 +921,7 @@ export class DataManager {
       );
       task.updatedAt = Date.now();
       if (user) {task.lastModifiedBy = user;}
-      this.addActivity(board, "relation_deleted", `Removed relation from "${task.title}"`, user, {
+      this.addActivity(board, "relation_deleted", `"${task.title}"`, user, {
         taskId,
       });
     });
@@ -974,7 +975,7 @@ export class DataManager {
       const colId = this.createId("col");
       const position = Object.keys(board.columns).length;
       board.columns[colId] = { id: colId, title, color, position };
-      this.addActivity(board, "column_created", `Created column "${title}"`, user, {
+      this.addActivity(board, "column_created", `"${title}"`, user, {
         metadata: { columnId: colId },
       });
     });
@@ -991,7 +992,7 @@ export class DataManager {
       const user = await AuthProvider.getGitHubUser();
       board.columns[id].title = title;
       board.columns[id].color = color;
-      this.addActivity(board, "column_updated", `Updated column "${title}"`, user, {
+      this.addActivity(board, "column_updated", `"${title}"`, user, {
         metadata: { columnId: id },
       });
     });
@@ -1013,7 +1014,7 @@ export class DataManager {
 
       delete board.columns[id];
       this.addTombstone(board, "column", id, user);
-      this.addActivity(board, "column_deleted", `Deleted column "${title}"`, user, {
+      this.addActivity(board, "column_deleted", `"${title}"`, user, {
         metadata: { columnId: id },
       });
 
@@ -1043,7 +1044,7 @@ export class DataManager {
       if (!board.labels) {board.labels = {};}
       const labelId = this.createId("label");
       board.labels[labelId] = { id: labelId, name, color };
-      this.addActivity(board, "label_created", `Created label "${name}"`, user, {
+      this.addActivity(board, "label_created", `"${name}"`, user, {
         metadata: { labelId },
       });
     });
@@ -1061,7 +1062,7 @@ export class DataManager {
       Object.values(board.tasks).forEach((task) => {
         task.labelIds = (task.labelIds || []).filter((id) => id !== labelId);
       });
-      this.addActivity(board, "label_deleted", `Deleted label "${name}"`, user, {
+      this.addActivity(board, "label_deleted", `"${name}"`, user, {
         metadata: { labelId },
       });
     });

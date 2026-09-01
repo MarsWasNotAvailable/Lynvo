@@ -14,7 +14,13 @@ import {
   lineHasMarker,
   TODO_KEYWORDS,
 } from "./providers/TodoTracker";
-import { initL10n, t } from "./l10n";
+import {
+  getAvailableLanguages,
+  getLanguageDisplayName,
+  initL10n,
+  setLanguage,
+  t,
+} from "./l10n";
 
 function selectionContainsTodo(editor: vscode.TextEditor | undefined): boolean {
   if (!editor || editor.selection.isEmpty) {
@@ -310,6 +316,39 @@ export function activate(context: vscode.ExtensionContext) {
       if (user) {
         await DataManager.touchCurrentUser();
         vscode.window.showInformationMessage(t("Connected as: {0}", user.username));
+      }
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("lynvo.setLanguage", async () => {
+      // Languages are auto-detected from the bundle files in localization/;
+      // display names come from the language code itself (no hardcoded map).
+      const options: Array<{ id: string; label: string }> = [
+        { id: "auto", label: t("Follow VS Code language") },
+        ...getAvailableLanguages().map((code) => ({
+          id: code,
+          label: getLanguageDisplayName(code),
+        })),
+      ];
+      const selected = await vscode.window.showQuickPick(options, {
+        title: t("Select interface language"),
+        placeHolder: t("Choose the language for the Lynvo interface"),
+      });
+      if (!selected) {
+        return;
+      }
+      await vscode.workspace
+        .getConfiguration("lynvo")
+        .update("language", selected.id, vscode.ConfigurationTarget.Global);
+      // Re-apply the bundle everywhere: host, sidebar menu, and open webview.
+      setLanguage(selected.id);
+      lynvoMenuProvider.refresh();
+      LynvoPanel.applyLanguage();
+      if (selected.id === "auto") {
+        vscode.window.showInformationMessage(t("Lynvo follows the VS Code language."));
+      } else {
+        vscode.window.showInformationMessage(t("Language set to {0}.", selected.label));
       }
     }),
   );

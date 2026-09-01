@@ -18,3 +18,11 @@ declare global {
 if (typeof window !== "undefined" && window.__LYNVO_I18N__) {
   config({ contents: window.__LYNVO_I18N__ });
 }
+
+// Re-configure the webview's l10n bundle at runtime
+// (caused by the display language toggle command).
+// t() reads the module-level bundle at call time,
+// so that a re-render after this call picks up the new strings.
+export function setWebviewLanguage(bundle: l10nJsonFormat): void {
+  config({ contents: bundle });
+}
