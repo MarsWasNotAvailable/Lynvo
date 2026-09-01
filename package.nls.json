@@ -1,1 +1,17 @@
-{ "views.lynvo.name": "Project Board" }
+{
+  "command.connectGitHub": "Lynvo: Connect GitHub",
+  "command.openBoard": "Lynvo: Open Board",
+  "command.openInsights": "Lynvo: Open Insights",
+  "command.openTable": "Lynvo: Open Table",
+  "command.openActivity": "Lynvo: Open Activity",
+  "command.openConflicts": "Lynvo: Open Conflicts",
+  "command.openLabels": "Lynvo: Manage Labels",
+  "command.quickCreateTask": "Lynvo: New Task",
+  "command.syncBoard": "Lynvo: Sync Team Board",
+  "command.promoteTodo": "Lynvo: Promote TODO to Task",
+  "command.installSkills": "Lynvo: Install Agent Skills",
+  "command.setLanguage": "Lynvo: Switch Language",
+  "configuration.skills.description": "Automatically install Lynvo agent skills (SKILL.md) for OpenCode, Claude Code, Cline, Cursor, and other AI agents on extension activation.",
+  "configuration.language.description" : "Language for the Lynvo interface. Use 'auto' to follow the VS Code language, or a code matching the available localization (e.g. 'en', 'es'). Display language can also be changed at runtime with 'Lynvo: Switch Language'.",
+  "views.projectActions.name": "Project Actions"
+}

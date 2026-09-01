@@ -41,54 +41,59 @@
     "onCommand:lynvo.promoteTodo",
     "onCommand:lynvo.syncBoard",
     "onCommand:lynvo.connectGitHub",
-    "onCommand:lynvo.installSkills"
+    "onCommand:lynvo.installSkills",
+    "onCommand:lynvo.setLanguage"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "lynvo.connectGitHub",
-        "title": "Lynvo: Connect GitHub"
+        "title": "%command.connectGitHub%"
       },
       {
         "command": "lynvo.openBoard",
-        "title": "Lynvo: Open Project Board"
+        "title": "%command.openBoard%"
       },
       {
         "command": "lynvo.openInsights",
-        "title": "Lynvo: Open Insights View"
+        "title": "%command.openInsights%"
       },
       {
         "command": "lynvo.openTable",
-        "title": "Lynvo: Open Table View"
+        "title": "%command.openTable%"
       },
       {
         "command": "lynvo.openActivity",
-        "title": "Lynvo: Open Activity Feed"
+        "title": "%command.openActivity%"
       },
       {
         "command": "lynvo.openConflicts",
-        "title": "Lynvo: Open Conflict Center"
+        "title": "%command.openConflicts%"
       },
       {
         "command": "lynvo.openLabels",
-        "title": "Lynvo: Open Labels Manager"
+        "title": "%command.openLabels%"
       },
       {
         "command": "lynvo.quickCreateTask",
-        "title": "Lynvo: Quick Create Task"
+        "title": "%command.quickCreateTask%"
       },
       {
         "command": "lynvo.syncBoard",
-        "title": "Lynvo: Sync Team Board"
+        "title": "%command.syncBoard%"
       },
       {
         "command": "lynvo.promoteTodo",
-        "title": "Lynvo: Promote TODO to Task"
+        "title": "%command.promoteTodo%"
       },
       {
         "command": "lynvo.installSkills",
-        "title": "Lynvo: Install Agent Skills"
+        "title": "%command.installSkills%"
+      },
+      {
+        "command": "lynvo.setLanguage",
+        "title": "%command.setLanguage%"
       }
     ],
     "menus": {
@@ -113,7 +118,7 @@
       "lynvo-explorer": [
         {
           "id": "lynvo.sidebarMenu",
-          "name": "Project Actions",
+          "name": "%views.projectActions.name%",
           "icon": "$(list-flat)"
         }
       ]
@@ -124,7 +129,12 @@
         "lynvo.autoInstallSkills": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically install Lynvo agent skills (SKILL.md) for OpenCode, Claude Code, Cline, Cursor, and other AI agents on extension activation."
+          "description": "%configuration.skills.description%"
+        },
+        "lynvo.language": {
+          "type": "string",
+          "default": "auto",
+          "description": "%configuration.language.description%"
         }
       }
     }
