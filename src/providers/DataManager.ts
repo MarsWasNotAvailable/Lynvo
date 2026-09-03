@@ -739,18 +739,25 @@ export class DataManager {
     dueDate?: number,
   ): Promise<void> {
     await this.mutateBoard(async (board) => {
-      if (!board.tasks[taskId]) {return;}
+      const task = board.tasks[taskId];
+      if (!task) {return;}
 
       const user = await AuthProvider.getGitHubUser();
-      board.tasks[taskId].title = title;
-      board.tasks[taskId].description = description;
-      board.tasks[taskId].labelIds = labelIds;
-      board.tasks[taskId].priority = priority;
-      board.tasks[taskId].dueDate = dueDate;
-      board.tasks[taskId].updatedAt = Date.now();
+      const previousTitle = task.title;
+      task.title = title;
+      task.description = description;
+      task.labelIds = labelIds;
+      task.priority = priority;
+      task.dueDate = dueDate;
+      task.updatedAt = Date.now();
 
-      if (user) {board.tasks[taskId].lastModifiedBy = user;}
-      this.addActivity(board, "task_updated", `"${title}"`, user, {
+      if (user) {task.lastModifiedBy = user;}
+      // A title change is a rename ("old ==> new"); otherwise it's a generic edit.
+      const isRename = previousTitle !== title;
+      const message = isRename
+        ? `"${previousTitle}" ==> "${title}"`
+        : `"${title}"`;
+      this.addActivity(board, isRename ? "task_renamed" : "task_updated", message, user, {
         taskId,
       });
     });
@@ -813,7 +820,7 @@ export class DataManager {
       task.checklist = [...(task.checklist || []), item];
       task.updatedAt = now;
       if (user) {task.lastModifiedBy = user;}
-      this.addActivity(board, "checklist_added", `"${task.title}"`, user, {
+      this.addActivity(board, "checklist_added", `"${task.title}" ::: ${item.text}`, user, {
         taskId,
       });
     });
@@ -830,6 +837,7 @@ export class DataManager {
       if (!task || !item) {return;}
 
       const user = await AuthProvider.getGitHubUser();
+      const previousText = item.text;
       if (typeof updates.text === "string") {
         item.text = updates.text.trim();
       }
@@ -841,14 +849,32 @@ export class DataManager {
       item.updatedAt = now;
       task.updatedAt = now;
       if (user) {task.lastModifiedBy = user;}
-      const isCompletion = updates.done === true;
-      this.addActivity(
-        board,
-        isCompletion ? "checklist_completed" : "checklist_updated",
-        `"${task.title}"`,
-        user,
-        { taskId },
-      );
+
+      // `updates.done` is `boolean | undefined`. The webview sends EITHER a
+      // `done` toggle (checkbox) OR a `text` edit (field blur) — never both —
+      // so per call exactly one of these holds:
+      //   done === true        -> just checked   -> completed
+      //   done === false       -> just unchecked -> reopened
+      //   done === undefined   -> a text edit    -> renamed
+      // Note: `undefined` matches neither `=== true` nor `=== false`, so the
+      // text-edit case falls through to checklist_renamed as intended.
+      let type: LynvoActivityType;
+      if (updates.done === true) {
+        type = "checklist_completed";
+      } else if (updates.done === false) {
+        type = "checklist_reopened";
+      } else {
+        type = "checklist_renamed";
+      }
+
+      // A rename shows "old ==> new" (a state change);
+      // a done toggle shows the item ::: its task (membership).
+      const message =
+        type === "checklist_renamed" && previousText !== item.text
+          ? `"${previousText}" ==> "${item.text}"`
+          : `"${task.title}" ::: ${item.text}`;
+
+      this.addActivity(board, type, message, user, { taskId });
     });
   }
 
@@ -900,7 +926,7 @@ export class DataManager {
       this.addActivity(
         board,
         "relation_added",
-        `"${task.title}" => "${board.tasks[targetTaskId].title}"`,
+        `"${task.title}" <=> "${board.tasks[targetTaskId].title}"`,
         user,
         { taskId, targetTaskId, metadata: { type } },
       );
@@ -921,7 +947,7 @@ export class DataManager {
       );
       task.updatedAt = Date.now();
       if (user) {task.lastModifiedBy = user;}
-      this.addActivity(board, "relation_deleted", `"${task.title}"`, user, {
+      this.addActivity(board, "relation_deleted", `"${task.title}" !=! "${relationId}"`, user, {
         taskId,
       });
     });
@@ -987,12 +1013,31 @@ export class DataManager {
     color: string,
   ): Promise<void> {
     await this.mutateBoard(async (board) => {
-      if (!board.columns[id]) {return;}
+      const column = board.columns[id];
+      if (!column) {return;}
 
       const user = await AuthProvider.getGitHubUser();
-      board.columns[id].title = title;
-      board.columns[id].color = color;
-      this.addActivity(board, "column_updated", `"${title}"`, user, {
+      const previousTitle = column.title;
+      const previousColor = column.color;
+      column.title = title;
+      column.color = color;
+
+      // A title change is a rename ("old ==> new");
+      // a color change has its own type;
+      // a no-op edit falls back to the (deprecated) column_updated.
+      let type: LynvoActivityType;
+      let message: string;
+      if (previousTitle !== title) {
+        type = "column_renamed";
+        message = `"${previousTitle}" => "${title}"`;
+      } else if (previousColor !== color) {
+        type = "column_color_changed";
+        message = `"${title}"`;
+      } else {
+        type = "column_updated";
+        message = `"${title}"`;
+      }
+      this.addActivity(board, type, message, user, {
         metadata: { columnId: id },
       });
     });

@@ -142,22 +142,38 @@ interface LynvoActivity {
 
 ### LynvoActivityType Values
 
+Message format convention:
+`"left" <=> "right"` is marking relations between two items;
+`"old"  ==> "new"` is a state change (a rename);
+`"task" ::: "item"` is membership (an item on its task).
+
 | Value | When to Use |
 |---|---|
 | `task_created` | New task created |
-| `task_updated` | Task title, description, labels, priority, or dueDate changed |
+| `task_updated` | Task description, labels, priority, or dueDate changed (deprecated for title changes — use `task_renamed`) |
+| `task_renamed` | Task title renamed, shown as `"old" ==> "new"` |
 | `task_moved` | Task moved between columns or reordered within column |
 | `task_deleted` | Task removed |
+| `link_removed` | Task's code TODO marker/reference removed (task stays on the board) |
 | `column_created` | New board column added |
-| `column_updated` | Column title or color changed |
+| `column_updated` | Generic column edit (planned for deprecation — use `column_renamed` / `column_color_changed`) |
+| `column_renamed` | Column title renamed, shown as `"old" ==> "new"` |
+| `column_color_changed` | Column color changed |
 | `column_deleted` | Column removed |
 | `label_created` | New label added |
 | `label_deleted` | Label removed |
-| `checklist_added` | Checklist item added to task |
-| `checklist_updated` | Checklist item toggled done/undone or text edited |
+| `checklist_added` | Checklist item added to task, shown as `"task" ::: item` |
+| `checklist_updated` | Checklist item text edited (planned for deprecation — use `checklist_renamed`) |
+| `checklist_renamed` | Checklist item text renamed, shown as `"old" ==> "new"` |
+| `checklist_completed` | Checklist item marked done, shown as `"task" ::: item` |
+| `checklist_reopened` | Checklist item marked not-done (reopened), shown as `"task" ::: item` |
 | `checklist_deleted` | Checklist item removed from task |
 | `relation_added` | Task relation created |
-| `relation_deleted` | Task relation removed |
+| `relation_deleted` | Task relation removed, shown as `"task" !=! "task"` |
+
+Note: the three `*_updated` types above are kept only for backward compatibility with existing activity logs;
+new activity uses the specific `*_renamed` / `column_color_changed` types.
+The `type` value stored in JSON is never localized — only its UI badge label is.
 
 ### LynvoSyncMetadata
 

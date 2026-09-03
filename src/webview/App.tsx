@@ -2590,6 +2590,7 @@ export const App: React.FC = () => {
       if (type.includes("deleted") || type.includes("removed")) {return "#f85149";}
       if (type.includes("created") || type.includes("added") || type.includes("completed")) {return "#3fb950";}
       if (type.includes("moved")) {return "#58a6ff";}
+      if (type.includes("renamed")) {return "#d29922";}
       return "var(--vscode-descriptionForeground)";
     };
 
