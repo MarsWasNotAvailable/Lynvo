@@ -4,6 +4,8 @@
   "description": "Professional Kanban board integrated with GitHub and your code.",
   "version": "1.1.1",
   "publisher": "DevBySergio",
+  "schemaVersion": "2.1.0",
+  "changelogUrl": "https://github.com/DevBySergio/Lynvo_by_Sergio/blob/main/CHANGELOG.md",
   "icon": "media/lynvo.png",
   "license": "MIT",
   "repository": {

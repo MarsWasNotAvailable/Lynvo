@@ -4,6 +4,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { DataManager } from "./DataManager";
+import { getSchemaVersion } from "../schema";
 import { t } from "../l10n";
 import {
   LynvoActivity,
@@ -249,7 +250,7 @@ export class GitService {
     }
 
     return {
-      version: metadata.version || "2.0.0",
+      version: metadata.version || getSchemaVersion(),
       columns,
       tasks,
       labels: metadata.labels || {},
@@ -273,14 +274,14 @@ export class GitService {
     await fs.mkdir(path.join(root, "metadata"), { recursive: true });
 
     await this.writeJson(path.join(root, "board.json"), {
-      version: "2.0.0",
+      version: getSchemaVersion(),
       labels: board.labels || {},
     });
     await this.writeJson(path.join(root, "columns.json"), board.columns);
     await this.writeJson(path.join(root, "users.json"), board.users || {});
     await this.writeJson(path.join(root, "settings.json"), {});
     await this.writeJson(path.join(root, "metadata", "version.json"), {
-      schemaVersion: "2.0.0",
+      schemaVersion: getSchemaVersion(),
     });
     await this.writeJson(path.join(root, "metadata", "sync.json"), {
       branch: this.SHADOW_BRANCH,
@@ -407,7 +408,7 @@ export class GitService {
     });
 
     return {
-      version: "2.0.0",
+      version: getSchemaVersion(),
       columns: mergedColumns,
       tasks: mergedTasks,
       labels: mergedLabels,

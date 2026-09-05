@@ -17,6 +17,12 @@ import {
 } from "../types";
 import { AuthProvider } from "./AuthProvider";
 import { t } from "../l10n";
+import {
+  getChangelogUrl,
+  getSchemaVersion,
+  majorDiffers,
+  maxVersion,
+} from "../schema";
 
 type BoardMetadata = {
   version: string;
@@ -29,8 +35,10 @@ export class DataManager {
   private static readonly LEGACY_FILENAME = "lynvo.json";
   private static readonly FOLDER = ".vscode";
   private static readonly MODULAR_FOLDER = "lynvo";
-  private static readonly SCHEMA_VERSION = "2.0.0";
   private static writeQueue: Promise<void> = Promise.resolve();
+
+  // In-memory guard so the schema-mismatch warning shows at most once per session.
+  private static schemaWarningShown = false;
 
   private static getWorkspaceUri(): vscode.Uri | undefined {
     const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -64,7 +72,7 @@ export class DataManager {
 
   private static getDefaultBoard(): LynvoBoard {
     return {
-      version: this.SCHEMA_VERSION,
+      version: getSchemaVersion(),
       columns: {
         todo: {
           id: "todo",
@@ -116,7 +124,10 @@ export class DataManager {
   private static ensureBoardIntegrity(board: Partial<LynvoBoard>): LynvoBoard {
     const defaults = this.getDefaultBoard();
     const next: LynvoBoard = {
-      version: this.SCHEMA_VERSION,
+      // Stamp only if higher:
+      // never downgrade a board that was written by a newer schema.
+      // Keeps the persisted version = max(extension, existing DB).
+      version: maxVersion(getSchemaVersion(), board.version),
       columns:
         board.columns && Object.keys(board.columns).length > 0
           ? board.columns
@@ -427,7 +438,8 @@ export class DataManager {
     await vscode.workspace.fs.createDirectory(metadataUri);
 
     await this.writeJsonAtomic(boardUri, {
-      version: this.SCHEMA_VERSION,
+      // cleanBoard.version already equals max(extension schema, DB version).
+      version: cleanBoard.version,
       labels: cleanBoard.labels || {},
     });
     await this.writeJsonAtomic(columnsUri, cleanBoard.columns);
@@ -437,7 +449,7 @@ export class DataManager {
     await this.writeJsonAtomic(tombstonesUri, cleanBoard.tombstones || {});
     await this.writeJsonAtomic(conflictsUri, cleanBoard.conflicts || {});
     await this.writeJsonAtomic(versionUri, {
-      schemaVersion: this.SCHEMA_VERSION,
+      schemaVersion: cleanBoard.version,
     });
 
     const expectedTaskFiles = new Set<string>();
@@ -557,6 +569,89 @@ export class DataManager {
     }
 
     return null;
+  }
+
+  /**
+   * Read the raw schema version persisted on disk, without applying the
+   * "stamp only if higher" logic. Returns the first version found, or null
+   * when there is no board data yet.
+   */
+  private static async readPersistedVersion(): Promise<string | null> {
+    const boardUri = this.joinModularPath("board.json");
+    if (boardUri && (await this.exists(boardUri))) {
+      try {
+        const metadata = await this.readJson<BoardMetadata>(boardUri);
+        if (metadata && typeof metadata.version === "string" && metadata.version) {
+          return metadata.version;
+        }
+      } catch {
+        // Corrupt board.json; try the dedicated version file next.
+      }
+    }
+
+    const versionUri = this.joinModularPath("metadata", "version.json");
+    if (versionUri && (await this.exists(versionUri))) {
+      try {
+        const parsed = await this.readJson<{ schemaVersion?: string }>(versionUri);
+        if (parsed && typeof parsed.schemaVersion === "string" && parsed.schemaVersion) {
+          return parsed.schemaVersion;
+        }
+      } catch {
+        // Ignore and fall back to the legacy file.
+      }
+    }
+
+    const legacyUri = this.getLegacyFileUri();
+    if (legacyUri && (await this.exists(legacyUri))) {
+      try {
+        const parsed = await this.readJson<{ version?: string }>(legacyUri);
+        if (parsed && typeof parsed.version === "string" && parsed.version) {
+          return parsed.version;
+        }
+      } catch {
+        // Ignore; no usable version found.
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Warn (once per session, non-blocking) when the persisted board data uses a
+   * different MAJOR schema version than this extension. A major difference
+   * signals possible breaking changes or data this version may not fully read.
+   * Minor/patch differences are intentionally ignored.
+   *
+   * Call this BEFORE the board is (re)saved,
+   * so the raw persisted version is still available to compare against.
+   */
+  public static async checkSchemaCompatibility(): Promise<void> {
+    if (this.schemaWarningShown) {
+      return;
+    }
+    const dbVersion = await this.readPersistedVersion();
+    if (!dbVersion) {
+      // No board data yet -> nothing to compare.
+      return;
+    }
+    const extVersion = getSchemaVersion();
+    if (!majorDiffers(extVersion, dbVersion)) {
+      return;
+    }
+
+    this.schemaWarningShown = true;
+    const openButton = t("Open release notes");
+    const choice = await vscode.window.showWarningMessage(
+      t(
+        "Lynvo: the board data (schema {0}) and this extension (schema {1}) use different major versions, so some data may be incompatible. Please review the release notes.",
+        dbVersion,
+        extVersion,
+      ),
+      openButton,
+    );
+    if (choice === openButton) {
+      await vscode.env.openExternal(vscode.Uri.parse(getChangelogUrl()));
+    }
   }
 
   public static async initializeBoard(): Promise<void> {

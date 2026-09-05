@@ -201,5 +201,7 @@
   "checklist_reopened": "Eintrag wieder geöffnet",
   "checklist_deleted": "Eintrag gelöscht",
   "relation_added": "Beziehung hinzugefügt",
-  "relation_deleted": "Beziehung entfernt"
+  "relation_deleted": "Beziehung entfernt",
+  "Lynvo: the board data (schema {0}) and this extension (schema {1}) use different major versions, so some data may be incompatible. Please review the release notes.": "Lynvo: Die Board-Daten (Schema {0}) und diese Erweiterung (Schema {1}) verwenden unterschiedliche Hauptversionen, daher können einige Daten inkompatibel sein. Bitte die Veröffentlichungsnotizen prüfen.",
+  "Open release notes": "Veröffentlichungsnotizen öffnen"
 }

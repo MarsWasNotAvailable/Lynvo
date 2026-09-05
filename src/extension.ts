@@ -241,6 +241,14 @@ export function activate(context: vscode.ExtensionContext) {
     .then((pending) => LynvoPanel.postRemotePending(pending))
     .catch(() => {});
 
+  // Warn once (non-blocking) if the persisted board data uses
+  // a different MAJOR schema version than this extension.
+  // Must run BEFORE initializeBoard
+  // so the raw persisted version is still available to compare against.
+  DataManager.checkSchemaCompatibility().catch((err) =>
+    console.error("Lynvo Schema Check Error:", err),
+  );
+
   DataManager.initializeBoard().catch((err) =>
     console.error("Lynvo Init Error:", err),
   );

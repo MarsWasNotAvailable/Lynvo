@@ -201,5 +201,7 @@
   "checklist_reopened": "Checklist reopened",
   "checklist_deleted": "Checklist deleted",
   "relation_added": "Relation added",
-  "relation_deleted": "Relation deleted"
+  "relation_deleted": "Relation deleted",
+  "Lynvo: the board data (schema {0}) and this extension (schema {1}) use different major versions, so some data may be incompatible. Please review the release notes.": "Lynvo: the board data (schema {0}) and this extension (schema {1}) use different major versions, so some data may be incompatible. Please review the release notes.",
+  "Open release notes": "Open release notes"
 }
