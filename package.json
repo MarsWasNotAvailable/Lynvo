@@ -2,7 +2,7 @@
   "name": "lynvo",
   "displayName": "Lynvo - Project Board by Sergio",
   "description": "Professional Kanban board integrated with GitHub and your code.",
-  "version": "1.0.1",
+  "version": "1.1.1",
   "publisher": "DevBySergio",
   "icon": "media/lynvo.png",
   "license": "MIT",

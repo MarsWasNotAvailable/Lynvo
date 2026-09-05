@@ -11,3 +11,18 @@ All notable changes to the "lynvo" extension will be documented in this file.
 - Added GitHub/code integration for creating tasks from selected source code and reopening linked files.
 - Added markdown rendering for technical task descriptions.
 - Added production webpack packaging, extension metadata, and marketplace icon.
+
+## [1.0.1]
+
+- ?
+
+## [1.1.0]
+
+- Replaced "Create Task From Selection" with "Promote Selection To Task". Using markers instead of lines
+- Added visual nudge to remove linked promoted TODO from code, through the Column view.
+- Added SVG-based icons for better UI and easier localization.
+
+## [1.1.1]
+
+- Added Localization : english (base), español, italiano, deutsch
+- Added new states of Activities

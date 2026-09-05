@@ -322,7 +322,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("lynvo.setLanguage", async () => {
-      // Languages are auto-detected from the bundle files in localization/;
+      // Languages are auto-detected from the bundle files in localization folder;
       // display names come from the language code itself (no hardcoded map).
       const options: Array<{ id: string; label: string }> = [
         { id: "auto", label: t("Follow VS Code language") },

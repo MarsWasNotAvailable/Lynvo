@@ -47,6 +47,8 @@ Install the generated VSIX in a clean VS Code window and validate:
 You need to download the Display languages.
 They are available on the Extension marketplace (including OpenVSX).
 Or from the `>Configure Display Language` command.
+NOTE : You *need* to hard-reload vscode/vscodium
+for the Commands Palette to be properly localized.
 
 ```bash
 # You can simply run a temporary instance

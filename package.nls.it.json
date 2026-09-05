@@ -1,0 +1,17 @@
+{
+  "command.connectGitHub": "Lynvo: Collega GitHub",
+  "command.openBoard": "Lynvo: Apri tabellone",
+  "command.openInsights": "Lynvo: Apri metriche",
+  "command.openTable": "Lynvo: Apri tabella",
+  "command.openActivity": "Lynvo: Apri attività",
+  "command.openConflicts": "Lynvo: Apri conflitti",
+  "command.openLabels": "Lynvo: Gestisci etichette",
+  "command.quickCreateTask": "Lynvo: Nuovo compito",
+  "command.syncBoard": "Lynvo: Sincronizza tabellone del team",
+  "command.promoteTodo": "Lynvo: Promuovi TODO a compito",
+  "command.installSkills": "Lynvo: Installa skills dell'agente",
+  "command.setLanguage": "Lynvo: Cambia lingua",
+  "configuration.skills.description": "Installa automaticamente il file delle skill (SKILL.md) dell'agente Lynvo per OpenCode, Claude Code, Cline, Cursor e altri agenti IA all'attivazione dell'estensione.",
+  "configuration.language.description": "Lingua per l'interfaccia di Lynvo. Usa 'auto' per usare la stessa lingua di VS Code, o un codice che corrisponda a una localizzazione disponibile (ad esempio 'en', 'es'). La lingua di visualizzazione può essere cambiata anche in tempo di esecuzione con 'Lynvo: Cambia lingua'.",
+  "views.projectActions.name": "Azioni del progetto"
+}
