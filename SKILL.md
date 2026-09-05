@@ -146,6 +146,10 @@ Message format convention:
 `"left" <=> "right"` is marking relations between two items;
 `"old"  ==> "new"` is a state change (a rename);
 `"task" ::: "item"` is membership (an item on its task).
+Column items are wrapped with square brackets : [...] .
+Task items are wrapped with curly brackets : {...} .
+Checklist items are wrapped with parenthesis : (...) .
+Anything else would be wrapped with quotes : “...” .
 
 | Value | When to Use |
 |---|---|
@@ -168,7 +172,7 @@ Message format convention:
 | `checklist_completed` | Checklist item marked done, shown as `"task" ::: item` |
 | `checklist_reopened` | Checklist item marked not-done (reopened), shown as `"task" ::: item` |
 | `checklist_deleted` | Checklist item removed from task |
-| `relation_added` | Task relation created |
+| `relation_added` | Task relation created, shown as `"task" <=> "task"` |
 | `relation_deleted` | Task relation removed, shown as `"task" !=! "task"` |
 
 Note: the three `*_updated` types above are kept only for backward compatibility with existing activity logs;

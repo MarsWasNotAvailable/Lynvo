@@ -644,7 +644,7 @@ export class DataManager {
       this.addActivity(
         board,
         "task_moved",
-        `"${board.tasks[taskId].title}" => ${board.columns[newStatus].title}`,
+        `{${board.tasks[taskId].title}} ==> [${board.columns[newStatus].title}]`,
         user,
         {
           taskId,
@@ -665,17 +665,19 @@ export class DataManager {
     await this.mutateBoard(async (board) => {
       const user = await AuthProvider.getGitHubUser();
       updates.forEach((upd) => {
-        if (!board.tasks[upd.id] || !board.columns[upd.status]) {return;}
+        const column = board.columns[upd.status];
+        const task = board.tasks[upd.id]
+        if (!task || !column) {return;}
 
-        board.tasks[upd.id].status = upd.status;
-        board.tasks[upd.id].position = upd.position;
+        task.status = upd.status;
+        task.position = upd.position;
         if (upd.isDraggedTask) {
-          board.tasks[upd.id].updatedAt = Date.now();
-          if (user) {board.tasks[upd.id].lastModifiedBy = user;}
+          task.updatedAt = Date.now();
+          if (user) {task.lastModifiedBy = user;}
           this.addActivity(
             board,
             "task_moved",
-            `"${board.tasks[upd.id].title}"`,
+            `{${task.title}"} ==> [${column.title}]`,
             user,
             {
               taskId: upd.id,
@@ -724,9 +726,7 @@ export class DataManager {
         priority,
         dueDate,
       };
-      this.addActivity(board, "task_created", `"${title}"`, user, {
-        taskId,
-      });
+      this.addActivity( board, "task_created", `{${title}}`, user, { taskId } );
     });
   }
 
@@ -755,11 +755,14 @@ export class DataManager {
       // A title change is a rename ("old ==> new"); otherwise it's a generic edit.
       const isRename = previousTitle !== title;
       const message = isRename
-        ? `"${previousTitle}" ==> "${title}"`
-        : `"${title}"`;
-      this.addActivity(board, isRename ? "task_renamed" : "task_updated", message, user, {
-        taskId,
-      });
+        ? `{${previousTitle}} ==> {${title}}`
+        : `{${title}}`;
+      this.addActivity(
+        board,
+        isRename ? "task_renamed" : "task_updated",
+        message,
+        user, { taskId }
+      );
     });
   }
 
@@ -772,13 +775,7 @@ export class DataManager {
       task.codeReference = undefined;
       task.updatedAt = Date.now();
       if (user) {task.lastModifiedBy = user;}
-      this.addActivity(
-        board,
-        "link_removed",
-        `"${task.title}"`,
-        user,
-        { taskId },
-      );
+      this.addActivity( board, "link_removed", `{${task.title}}`, user, { taskId } );
     });
   }
 
@@ -793,9 +790,7 @@ export class DataManager {
           (relation) => relation.targetTaskId !== taskId,
         );
       });
-      this.addActivity(board, "task_deleted", `"${taskTitle}"`, user, {
-        taskId,
-      });
+      this.addActivity(board, "task_deleted", `{${taskTitle}}`, user, { taskId });
     });
   }
 
@@ -820,9 +815,12 @@ export class DataManager {
       task.checklist = [...(task.checklist || []), item];
       task.updatedAt = now;
       if (user) {task.lastModifiedBy = user;}
-      this.addActivity(board, "checklist_added", `"${task.title}" ::: ${item.text}`, user, {
-        taskId,
-      });
+      this.addActivity(
+        board,
+        "checklist_added",
+        `{${task.title}} ::: (${item.text})`,
+        user, { taskId }
+      );
     });
   }
 
@@ -867,12 +865,12 @@ export class DataManager {
         type = "checklist_renamed";
       }
 
-      // A rename shows "old ==> new" (a state change);
-      // a done toggle shows the item ::: its task (membership).
+      // A rename shows "{task} ::: (old) ==> (new)" (a state change);
+      // a done toggle shows the "(task) ::: (item)".
       const message =
         type === "checklist_renamed" && previousText !== item.text
-          ? `"${previousText}" ==> "${item.text}"`
-          : `"${task.title}" ::: ${item.text}`;
+          ? `{${task.title}} ::: (${previousText}) ==> (${item.text})`
+          : `{${task.title}} ::: (${item.text})`;
 
       this.addActivity(board, type, message, user, { taskId });
     });
@@ -887,12 +885,16 @@ export class DataManager {
       if (!task) {return;}
 
       const user = await AuthProvider.getGitHubUser();
+      const removedItem = task.checklist?.find((item) => item.id !== itemId);
       task.checklist = (task.checklist || []).filter((item) => item.id !== itemId);
       task.updatedAt = Date.now();
       if (user) {task.lastModifiedBy = user;}
-      this.addActivity(board, "checklist_deleted", `"${task.title}"`, user, {
-        taskId,
-      });
+      this.addActivity(
+        board,
+        "checklist_deleted",
+        `{${task.title}} ::: (${removedItem?.text || "_reference_lost_"})`,
+        user, { taskId }
+      );
     });
   }
 
@@ -926,7 +928,7 @@ export class DataManager {
       this.addActivity(
         board,
         "relation_added",
-        `"${task.title}" <=> "${board.tasks[targetTaskId].title}"`,
+        `{${task.title}} <=> {${board.tasks[targetTaskId].title}}`,
         user,
         { taskId, targetTaskId, metadata: { type } },
       );
@@ -941,15 +943,24 @@ export class DataManager {
       const task = board.tasks[taskId];
       if (!task) {return;}
 
+      // Capture the relation and its target task BEFORE filtering it out,
+      // so the activity can show both task titles (relationId is NOT a task key).
+      const relations = task.relations || [];
+      const relation = relations.find((candidate) => candidate.id === relationId);
+      if (!relation) {return;}
+      const targetTask = board.tasks[relation.targetTaskId];
+
       const user = await AuthProvider.getGitHubUser();
-      task.relations = (task.relations || []).filter(
-        (relation) => relation.id !== relationId,
-      );
+      task.relations = relations.filter((candidate) => candidate.id !== relationId);
       task.updatedAt = Date.now();
       if (user) {task.lastModifiedBy = user;}
-      this.addActivity(board, "relation_deleted", `"${task.title}" !=! "${relationId}"`, user, {
-        taskId,
-      });
+      this.addActivity(
+        board,
+        "relation_deleted",
+        `{${task.title}} !=! {${targetTask?.title || relation.targetTaskId}}`,
+        user,
+        { taskId, targetTaskId: relation.targetTaskId, metadata: { type: relation.type } },
+      );
     });
   }
 
@@ -1001,9 +1012,10 @@ export class DataManager {
       const colId = this.createId("col");
       const position = Object.keys(board.columns).length;
       board.columns[colId] = { id: colId, title, color, position };
-      this.addActivity(board, "column_created", `"${title}"`, user, {
-        metadata: { columnId: colId },
-      });
+      this.addActivity(
+        board, "column_created", `[${title}]`,
+        user, { metadata: { columnId: colId } }
+      );
     });
   }
 
@@ -1029,17 +1041,18 @@ export class DataManager {
       let message: string;
       if (previousTitle !== title) {
         type = "column_renamed";
-        message = `"${previousTitle}" => "${title}"`;
+        message = `[${previousTitle}] ==> [${title}]`;
       } else if (previousColor !== color) {
         type = "column_color_changed";
-        message = `"${title}"`;
+        message = `[${title}]`;
       } else {
         type = "column_updated";
-        message = `"${title}"`;
+        message = `[${title}]`;
       }
-      this.addActivity(board, type, message, user, {
-        metadata: { columnId: id },
-      });
+      this.addActivity(
+        board, type, message,
+        user, { metadata: { columnId: id } }
+      );
     });
   }
 
@@ -1059,9 +1072,10 @@ export class DataManager {
 
       delete board.columns[id];
       this.addTombstone(board, "column", id, user);
-      this.addActivity(board, "column_deleted", `"${title}"`, user, {
-        metadata: { columnId: id },
-      });
+      this.addActivity(
+        board, "column_deleted", `[${title}]`,
+        user, { metadata: { columnId: id } }
+      );
 
       for (const taskId in board.tasks) {
         if (board.tasks[taskId].status === id) {
@@ -1089,9 +1103,10 @@ export class DataManager {
       if (!board.labels) {board.labels = {};}
       const labelId = this.createId("label");
       board.labels[labelId] = { id: labelId, name, color };
-      this.addActivity(board, "label_created", `"${name}"`, user, {
-        metadata: { labelId },
-      });
+      this.addActivity(
+        board, "label_created", `#${name}#`,
+        user, { metadata: { labelId } }
+      );
     });
   }
 
@@ -1107,9 +1122,10 @@ export class DataManager {
       Object.values(board.tasks).forEach((task) => {
         task.labelIds = (task.labelIds || []).filter((id) => id !== labelId);
       });
-      this.addActivity(board, "label_deleted", `"${name}"`, user, {
-        metadata: { labelId },
-      });
+      this.addActivity(
+        board, "label_deleted", `#${name}#`,
+        user, { metadata: { labelId } }
+      );
     });
   }
 }
