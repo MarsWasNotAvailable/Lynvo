@@ -31,6 +31,26 @@ type BoardMetadata = {
 
 const UNKNOWN_USER = { githubId: "unknown", username: "Unknown" };
 
+// Map a task relation type to its specific activity type.
+// `related` uses the legacy catch-all `relation_added` / `relation_deleted`;
+// the other types (blocks, blocked-by, duplicates) have dedicated added/removed types.
+const generateRelationActivityType = (
+  relationType: LynvoTaskRelationType,
+  verb: "added" | "deleted",
+): LynvoActivityType => {
+  switch (relationType) {
+    case "blocks":
+      return `relation_block_${verb}`;
+    case "blocked-by":
+      return `relation_blockedby_${verb}`;
+    case "duplicates":
+      return `relation_duplicates_${verb}`;
+    case "related":
+    default:
+      return `relation_${verb}`;
+  }
+};
+
 export class DataManager {
   private static readonly LEGACY_FILENAME = "lynvo.json";
   private static readonly FOLDER = ".vscode";
@@ -1031,7 +1051,7 @@ export class DataManager {
       if (user) {task.lastModifiedBy = user;}
       this.addActivity(
         board,
-        "relation_added",
+        generateRelationActivityType(type, "added"),
         `{${task.title}} <=> {${board.tasks[targetTaskId].title}}`,
         user,
         { taskId, targetTaskId, metadata: { type } },
@@ -1060,7 +1080,7 @@ export class DataManager {
       if (user) {task.lastModifiedBy = user;}
       this.addActivity(
         board,
-        "relation_deleted",
+        generateRelationActivityType(relation.type, "deleted"),
         `{${task.title}} !=! {${targetTask?.title || relation.targetTaskId}}`,
         user,
         { taskId, targetTaskId: relation.targetTaskId, metadata: { type: relation.type } },

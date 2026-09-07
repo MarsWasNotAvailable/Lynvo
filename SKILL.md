@@ -176,11 +176,19 @@ Anything else would be wrapped with quotes : “...” .
 | `checklist_completed` | Checklist item marked done, shown as `"task" ::: item` |
 | `checklist_reopened` | Checklist item marked not-done (reopened), shown as `"task" ::: item` |
 | `checklist_deleted` | Checklist item removed from task |
-| `relation_added` | Task relation created, shown as `"task" <=> "task"` |
-| `relation_deleted` | Task relation removed, shown as `"task" !=! "task"` |
+| `relation_added` | "related" relation created (legacy catch-all for relations), shown as `"task" <=> "task"` |
+| `relation_deleted` | "related" relation removed (legacy catch-all for relations), shown as `"task" !=! "task"` |
+| `relation_block_added` | "blocks" relation created, shown as `"task" <=> "task"` |
+| `relation_block_deleted` | "blocks" relation removed, shown as `"task" !=! "task"` |
+| `relation_blockedby_added` | "blocked-by" relation created, shown as `"task" <=> "task"` |
+| `relation_blockedby_deleted` | "blocked-by" relation removed, shown as `"task" !=! "task"` |
+| `relation_duplicates_added` | "duplicates" relation created, shown as `"task" <=> "task"` |
+| `relation_duplicates_deleted` | "duplicates" relation removed, shown as `"task" !=! "task"` |
 
-Note: the three `*_updated` types above are kept only for backward compatibility with existing activity logs;
-new activity uses the specific `*_renamed` / `column_color_changed` types.
+Note: the three `*_updated` types above are kept only for backward compatibility with existing activity logs, or at worse a default cases where the specific types cannot be specified;
+Any new activity should uses the specific `*_renamed` / `column_color_changed` types.
+Likewise, `relation_added` / `relation_deleted` are now specific to the "related" type (and kept for legacy "related" entries);
+The blocks / blocked-by / duplicates relation types have their own dedicated added/removed types.
 The `type` value stored in JSON is never localized — only its UI badge label is.
 
 ### LynvoSyncMetadata
@@ -417,8 +425,8 @@ When VS Code commands are unavailable, follow these recipes exactly. Always read
 | Add checklist item | Append a `LynvoChecklistItem` to `checklist`, update task timestamps/actor, and add `checklist_added` activity. |
 | Update checklist item | Modify only `text` and/or `done`, update item and task timestamps/actor, and add `checklist_updated` activity. |
 | Delete checklist item | Remove the checklist item, update task timestamps/actor, and add `checklist_deleted` activity. |
-| Add relation | Add one directed relation to the source task only after confirming both tasks exist, source and target differ, and the same `targetTaskId` + `type` is not already present. Add `relation_added` activity. |
-| Delete relation | Remove the relation from the source task by relation id, update task timestamps/actor, and add `relation_deleted` activity. |
+| Add relation | Add one directed relation to the source task only after confirming both tasks exist, source and target differ, and the same `targetTaskId` + `type` is not already present. Add the relation-specific activity: `relation_added` (related), `relation_block_added` (blocks), `relation_blockedby_added` (blocked-by), or `relation_duplicates_added` (duplicates). |
+| Delete relation | Remove the relation from the source task by relation id, update task timestamps/actor, and add the matching removed activity by the relation's `type`: `relation_deleted`, `relation_block_deleted`, `relation_blockedby_deleted`, or `relation_duplicates_deleted`. |
 | Create column | Reuse an existing case-insensitive column title first. If creating, add a `col-*` entry to `columns.json` with deterministic `position` and add `column_created` activity. |
 | Create label | Reuse an existing case-insensitive label name first. If creating, add a `label-*` entry under `board.json.labels` and add `label_created` activity. |
 | Resolve conflict | Update the task field only when choosing or synthesizing a new value, set the conflict's `resolved` to `true`, update sync metadata to `conflict` if unresolved conflicts remain or `pending` if all are resolved. Do not invent an activity type for conflict resolution. |
@@ -834,7 +842,7 @@ The extension writes `settings.json` as an empty object `{}` on every save. Do n
 | Delete task | Remove `tasks/{taskId}.json` + update `metadata/tombstones.json` + write activity | `task_deleted` |
 | Add checklist | Modify `tasks/{taskId}.json` + write activity | `checklist_added` |
 | Toggle checklist | Modify `tasks/{taskId}.json` + write activity | `checklist_updated` |
-| Add relation | Modify `tasks/{taskId}.json` + write activity | `relation_added` |
+| Add relation | Modify `tasks/{taskId}.json` + write activity | `relation_added` / `relation_block_added` / `relation_blockedby_added` / `relation_duplicates_added` |
 | Create column | Modify `columns.json` + write activity | `column_created` |
 | Create label | Modify `board.json` labels + write activity | `label_created` |
 | Resolve conflict | Modify `tasks/{taskId}.json` + update `metadata/conflicts.json` | — |

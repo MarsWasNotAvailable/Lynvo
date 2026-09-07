@@ -71,7 +71,13 @@ export type LynvoActivityType =
   | "checklist_reopened"
   | "checklist_deleted"
   | "relation_added"
-  | "relation_deleted";
+  | "relation_deleted"
+  | "relation_block_added"
+  | "relation_block_deleted"
+  | "relation_blockedby_added"
+  | "relation_blockedby_deleted"
+  | "relation_duplicates_added"
+  | "relation_duplicates_deleted";
 
 export interface LynvoActivity {
   id: string;
