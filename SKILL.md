@@ -149,6 +149,7 @@ Message format convention:
 Column items are wrapped with square brackets : [...] .
 Task items are wrapped with curly brackets : {...} .
 Checklist items are wrapped with parenthesis : (...) .
+Labels items are wrapped with the number symbol : #...# .
 Anything else would be wrapped with quotes : “...” .
 
 | Value | When to Use |
@@ -156,7 +157,7 @@ Anything else would be wrapped with quotes : “...” .
 | `task_created` | New task created |
 | `task_updated` | Task description, labels, priority, or dueDate changed (deprecated for title changes — use `task_renamed`) |
 | `task_renamed` | Task title renamed, shown as `"old" ==> "new"` |
-| `task_moved` | Task moved between columns or reordered within column |
+| `task_moved` | Task moved between columns or reordered within column, shown as `{task} ==> [column]` |
 | `task_deleted` | Task removed |
 | `link_removed` | Task's code TODO marker/reference removed (task stays on the board) |
 | `column_created` | New board column added |
@@ -165,6 +166,8 @@ Anything else would be wrapped with quotes : “...” .
 | `column_color_changed` | Column color changed |
 | `column_deleted` | Column removed |
 | `label_created` | New label added |
+| `label_renamed` | Label name renamed, shown as `#old# ==> #new#` |
+| `label_color_changed` | Label color changed, shown as `#label_name#` |
 | `label_deleted` | Label removed |
 | `checklist_added` | Checklist item added to task, shown as `"task" ::: item` |
 | `checklist_updated` | Checklist item text edited (planned for deprecation — use `checklist_renamed`) |

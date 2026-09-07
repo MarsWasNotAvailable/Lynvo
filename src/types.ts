@@ -60,6 +60,8 @@ export type LynvoActivityType =
   | "column_color_changed"
   | "column_deleted"
   | "label_created"
+  | "label_renamed"
+  | "label_color_changed"
   | "label_deleted"
   | "checklist_added"
   | "checklist_updated"

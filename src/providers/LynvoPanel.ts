@@ -398,6 +398,19 @@ export class LynvoPanel {
             LynvoPanel.refreshDataAndScheduleSync();
             return;
           }
+          case "updateLabel": {
+            const labelId = asString(message.labelId);
+            if (!labelId) {
+              return;
+            }
+            await DataManager.updateLabel(
+              labelId,
+              asString(message.name) || "",
+              asString(message.color) || "#f85149",
+            );
+            LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
           case "deleteLabel": {
             const labelId = asString(message.labelId);
             if (!labelId) {

@@ -761,7 +761,7 @@ export class DataManager {
       const user = await AuthProvider.getGitHubUser();
       updates.forEach((upd) => {
         const column = board.columns[upd.status];
-        const task = board.tasks[upd.id]
+        const task = board.tasks[upd.id];
         if (!task || !column) {return;}
 
         task.status = upd.status;
@@ -772,7 +772,7 @@ export class DataManager {
           this.addActivity(
             board,
             "task_moved",
-            `{${task.title}"} ==> [${column.title}]`,
+            `{${task.title}} ==> [${column.title}]`,
             user,
             {
               taskId: upd.id,
@@ -1202,6 +1202,43 @@ export class DataManager {
         board, "label_created", `#${name}#`,
         user, { metadata: { labelId } }
       );
+    });
+  }
+
+  public static async updateLabel(
+    labelId: string,
+    name: string,
+    color: string,
+  ): Promise<void> {
+    await this.mutateBoard(async (board) => {
+      const label = board.labels?.[labelId];
+      if (!label) {return;}
+
+      const previousName = label.name;
+      const previousColor = label.color;
+      const trimmed = name.trim();
+      if (trimmed) {label.name = trimmed;}
+      label.color = color;
+
+      const user = await AuthProvider.getGitHubUser();
+      if (previousName !== label.name) {
+        this.addActivity(
+          board,
+          "label_renamed",
+          `#${previousName}# ==> #${label.name}#`,
+          user,
+          { metadata: { labelId } },
+        );
+      }
+      if (previousColor !== label.color) {
+        this.addActivity(
+          board,
+          "label_color_changed",
+          `#${label.name}#`,
+          user,
+          { metadata: { labelId } },
+        );
+      }
     });
   }
 

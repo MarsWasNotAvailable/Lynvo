@@ -6,6 +6,7 @@ import {
   LynvoActivity,
   LynvoBoard,
   LynvoColumn,
+  LynvoLabel,
   LynvoTask,
   LynvoTaskRelationType,
 } from "../types";
@@ -57,6 +58,7 @@ type WebviewOutboundMessage =
   | { command: "deleteColumn"; colId: string }
   | { command: "reorderColumns"; updates: Array<{ id: string; position: number }> }
   | { command: "createLabel"; name: string; color: string }
+  | { command: "updateLabel"; labelId: string; name: string; color: string }
   | { command: "deleteLabel"; labelId: string }
   | { command: "resolveConflict"; conflictId: string; resolution: "local" | "remote" }
   | {
@@ -127,6 +129,50 @@ const SaveIcon = () => (
     <polyline points="20 6 9 17 4 12" />
   </svg>
 );
+
+const PlusIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+
+const SortIcon = ({ direction }: { direction: "asc" | "desc" }) => {
+  const ascending = direction === "asc";
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="3" y1="6" x2="13" y2="6" />
+      <line x1="3" y1="12" x2="10" y2="12" />
+      <line x1="3" y1="18" x2="7" y2="18" />
+      <line x1="19" y1={ascending ? "6" : "18"} x2="19" y2={ascending ? "18" : "6"} />
+      <polyline
+        points={ascending ? "16 9 19 6 22 9" : "16 15 19 18 22 15"}
+      />
+    </svg>
+  );
+};
 
 const iconButtonStyle: React.CSSProperties = {
   padding: "2px 5px",
@@ -987,6 +1033,12 @@ export const App: React.FC = () => {
 
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelColor, setNewLabelColor] = useState("#f85149");
+  const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
+  const [editLabelName, setEditLabelName] = useState("");
+  const [editLabelColor, setEditLabelColor] = useState("#f85149");
+  const [labelsSortAsc, setLabelsSortAsc] = useState(true);
+  const [labelsSortKey, setLabelsSortKey] = useState<"name" | "usage">("name");
+  const [labelError, setLabelError] = useState<string | null>(null);
   const [checklistDrafts, setChecklistDrafts] = useState<Record<string, string>>({});
   const [relationTargetByTask, setRelationTargetByTask] = useState<Record<string, string>>({});
   const [relationTypeByTask, setRelationTypeByTask] = useState<
@@ -1099,6 +1151,18 @@ export const App: React.FC = () => {
   );
 
   const tasks = useMemo(() => Object.values(boardData?.tasks || {}), [boardData]);
+
+  // How many tasks reference each label (by id);
+  // powers the labels panel usage count, and the "sort by usage" option.
+  const labelUsage = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const task of Object.values(boardData?.tasks || {})) {
+      for (const id of task.labelIds || []) {
+        counts[id] = (counts[id] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [boardData]);
 
   const filteredTasks = useMemo(
     () =>
@@ -2047,63 +2111,229 @@ export const App: React.FC = () => {
     );
   };
 
-  const renderLabelsManager = () => (
-    <div style={{ padding: "20px", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", borderRadius: "8px" }}>
-      <h2>{t("Manage Labels")}</h2>
-      <div style={{ display: "flex", gap: "10px", marginBottom: "20px", alignItems: "center" }}>
-        <input type="color" value={newLabelColor} onChange={(e) => setNewLabelColor(e.target.value)} />
-        <input
-          placeholder={t("New label name...")}
-          value={newLabelName}
-          onChange={(e) => setNewLabelName(e.target.value)}
-          style={{ padding: "6px" }}
-        />
-        <button
-          onClick={() => {
-            if (!newLabelName.trim()) {return;}
-            vscode.postMessage({ command: "createLabel", name: newLabelName.trim(), color: newLabelColor });
-            setNewLabelName("");
-          }}
-          style={{ padding: "6px 12px", backgroundColor: "var(--vscode-button-background)", color: "white", border: "none", cursor: "pointer" }}
-        >
-          {t("Create Label")}
-        </button>
-      </div>
-      <div>
-        {boardData?.labels &&
-          Object.values(boardData.labels).map((label) => (
-            <div
-              key={label.id}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "10px",
-                borderBottom: "1px solid var(--vscode-widget-border)",
-              }}
+  const renderLabelsManager = () => {
+    const allLabels = boardData?.labels ? Object.values(boardData.labels) : [];
+    const usageOf = (labelId: string) => labelUsage[labelId] || 0;
+    const sortedLabels = [...allLabels].sort((a, b) => {
+      let cmp =
+        labelsSortKey === "usage"
+          ? usageOf(a.id) - usageOf(b.id)
+          : a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      if (cmp === 0) {
+        cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      }
+      return labelsSortAsc ? cmp : -cmp;
+    });
+
+    // Case-insensitive duplicate check. `excludeId` lets the rename flow ignore
+    // the label being edited, so re-saving the same name is still allowed.
+    const nameExists = (name: string, excludeId?: string) =>
+      allLabels.some(
+        (label) => label.id !== excludeId && label.name.toLowerCase() === name.toLowerCase(),
+      );
+
+    const startEditingLabel = (label: LynvoLabel) => {
+      setEditingLabelId(label.id);
+      setEditLabelName(label.name);
+      setEditLabelColor(label.color);
+      setLabelError(null);
+    };
+
+    const saveLabelEdit = () => {
+      if (!editingLabelId || !editLabelName.trim()) {return;}
+      if (nameExists(editLabelName.trim(), editingLabelId)) {
+        setLabelError(t("A label with this name already exists."));
+        return;
+      }
+      vscode.postMessage({
+        command: "updateLabel",
+        labelId: editingLabelId,
+        name: editLabelName.trim(),
+        color: editLabelColor,
+      });
+      setEditingLabelId(null);
+      setLabelError(null);
+    };
+
+    const createNewLabel = () => {
+      if (!newLabelName.trim()) {return;}
+      if (nameExists(newLabelName.trim())) {
+        setLabelError(t("A label with this name already exists."));
+        return;
+      }
+      vscode.postMessage({ command: "createLabel", name: newLabelName.trim(), color: newLabelColor });
+      setNewLabelName("");
+      setLabelError(null);
+    };
+
+    return (
+      <div style={{ padding: "20px", backgroundColor: "var(--lynvo-panel)", borderRadius: "8px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h2 style={{ margin: 0 }}>{t("Manage Labels")}</h2>
+          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+            <select
+              value={labelsSortKey}
+              onChange={(e) => setLabelsSortKey(e.target.value as "name" | "usage")}
+              style={{ padding: "4px" }}
+              aria-label={t("Sort labels by")}
             >
-              <span
+              <option value="name">{t("Name")}</option>
+              <option value="usage">{t("Usage")}</option>
+            </select>
+            <button
+              className="icon-btn"
+              style={iconButtonStyle}
+              onClick={() => setLabelsSortAsc((value) => !value)}
+              title={
+                labelsSortKey === "usage"
+                  ? labelsSortAsc
+                    ? t("Least used first")
+                    : t("Most used first")
+                  : labelsSortAsc
+                    ? t("Sort: A to Z")
+                    : t("Sort: Z to A")
+              }
+              aria-label={t("Toggle label sort order")}
+            >
+              <SortIcon direction={labelsSortAsc ? "asc" : "desc"} />
+            </button>
+          </div>
+        </div>
+
+        {labelError && (
+          <div style={{ marginBottom: "12px", fontSize: "12px", color: "var(--vscode-errorForeground)" }}>
+            {labelError}
+          </div>
+        )}
+
+        <div
+          style={{
+            maxHeight: "55vh",
+            overflowY: "auto",
+            border: "1px solid var(--vscode-widget-border)",
+            borderRadius: "6px",
+          }}
+        >
+          {allLabels.length === 0 && (
+            <div style={{ padding: "16px", color: "var(--vscode-descriptionForeground)" }}>
+              {t("No labels yet. Add one below.")}
+            </div>
+          )}
+
+          {sortedLabels.map((label) => {
+            const isEditing = editingLabelId === label.id;
+            return (
+              <div
+                key={label.id}
                 style={{
-                  backgroundColor: label.color,
-                  color: "#fff",
-                  padding: "4px 10px",
-                  borderRadius: "12px",
-                  fontSize: "12px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "10px 12px",
+                  borderBottom: "1px solid var(--vscode-widget-border)",
                 }}
               >
-                {label.name}
-              </span>
-              <button
-                className="icon-btn delete"
-                onClick={() => vscode.postMessage({ command: "deleteLabel", labelId: label.id })}
-              >
-                {t("Delete")}
-              </button>
-            </div>
-          ))}
+                {isEditing ? (
+                  <>
+                    <input
+                      type="color"
+                      value={editLabelColor}
+                      onChange={(e) => setEditLabelColor(e.target.value)}
+                      title={t("Pick label color")}
+                      aria-label={t("Pick label color")}
+                    />
+                    <input
+                      value={editLabelName}
+                      onChange={(e) => {
+                        setEditLabelName(e.target.value);
+                        setLabelError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {saveLabelEdit();}
+                      }}
+                      style={{ flex: 1, padding: "5px" }}
+                      aria-label={t("Label name")}
+                    />
+                    <button className="icon-btn" style={iconButtonStyle} onClick={saveLabelEdit} title={t("Save")} aria-label={t("Save")}><SaveIcon /></button>
+                    <button className="icon-btn" style={iconButtonStyle} onClick={() => setEditingLabelId(null)} title={t("Cancel")} aria-label={t("Cancel")}>×</button>
+                  </>
+                ) : (
+                  <>
+                    <span
+                      style={{
+                        width: "16px",
+                        height: "16px",
+                        borderRadius: "50%",
+                        backgroundColor: label.color,
+                        flexShrink: 0,
+                        display: "inline-block",
+                      }}
+                      aria-hidden="true"
+                    />
+                    <span style={{ flex: 1 }}>{label.name}</span>
+                    <span style={{ fontSize: "11px", color: "var(--vscode-descriptionForeground)", whiteSpace: "nowrap" }}>
+                      {t("{0} tasks", usageOf(label.id))}
+                    </span>
+                    <button className="icon-btn" style={iconButtonStyle} onClick={() => startEditingLabel(label)} title={t("Edit")} aria-label={t("Edit")}><EditIcon /></button>
+                    <button
+                      className="icon-btn delete"
+                      style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}
+                      onClick={() => vscode.postMessage({ command: "deleteLabel", labelId: label.id })}
+                      title={t("Delete")}
+                      aria-label={t("Delete")}
+                    >
+                      <DeleteIcon />
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Creation field — always the last line */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              padding: "10px 12px",
+              borderTop: allLabels.length > 0 ? "1px solid var(--vscode-widget-border)" : "none",
+            }}
+          >
+            <input
+              type="color"
+              value={newLabelColor}
+              onChange={(e) => setNewLabelColor(e.target.value)}
+              title={t("Pick label color")}
+              aria-label={t("Pick label color")}
+            />
+            <input
+              placeholder={t("New label name...")}
+              value={newLabelName}
+              onChange={(e) => {
+                setNewLabelName(e.target.value);
+                setLabelError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {createNewLabel();}
+              }}
+              style={{ flex: 1, padding: "5px" }}
+            />
+            <button
+              className="icon-btn"
+              style={iconButtonStyle}
+              onClick={createNewLabel}
+              disabled={!newLabelName.trim()}
+              title={t("Create Label")}
+              aria-label={t("Create Label")}
+            >
+              <PlusIcon />
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderInsights = () => {
     if (!boardData) {return null;}
