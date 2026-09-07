@@ -159,6 +159,7 @@ Anything else would be wrapped with quotes : “...” .
 | `task_renamed` | Task title renamed, shown as `"old" ==> "new"` |
 | `task_moved` | Task moved between columns or reordered within column, shown as `{task} ==> [column]` |
 | `task_deleted` | Task removed |
+| `link_added` | Task's code TODO marker/reference added, shown as `{task}` (filePath stored in `metadata`) |
 | `link_removed` | Task's code TODO marker/reference removed (task stays on the board) |
 | `column_created` | New board column added |
 | `column_updated` | Generic column edit (planned for deprecation — use `column_renamed` / `column_color_changed`) |

@@ -822,6 +822,15 @@ export class DataManager {
         dueDate,
       };
       this.addActivity( board, "task_created", `{${title}}`, user, { taskId } );
+      if (codeReference) {
+        this.addActivity(
+          board,
+          "link_added",
+          `{${title}}`,
+          user,
+          { taskId, metadata: { filePath: codeReference.filePath } },
+        );
+      }
     });
   }
 

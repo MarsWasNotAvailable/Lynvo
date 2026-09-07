@@ -192,6 +192,7 @@
   "task_renamed": "Task renamed",
   "task_moved": "Task moved",
   "task_deleted": "Task deleted",
+  "link_added": "Link added",
   "link_removed": "Link removed",
   "column_created": "Column created",
   "column_updated": "Column updated",

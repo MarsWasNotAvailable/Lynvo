@@ -53,6 +53,7 @@ export type LynvoActivityType =
   | "task_renamed"
   | "task_moved"
   | "task_deleted"
+  | "link_added"
   | "link_removed"
   | "column_created"
   | "column_updated"

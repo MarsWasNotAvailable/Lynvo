@@ -192,6 +192,7 @@
   "task_renamed": "Aufgabe umbenannt",
   "task_moved": "Aufgabe verschoben",
   "task_deleted": "Aufgabe gelöscht",
+  "link_added": "Verknüpfung hinzugefügt",
   "link_removed": "Verknüpfung entfernt",
   "column_created": "Spalte erstellt",
   "column_updated": "Spalte aktualisiert",
