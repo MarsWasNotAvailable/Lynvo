@@ -1,4 +1,5 @@
 {
+  "Could not resolve relation target(s): {0}. Fix the task title and promote again.": "Impossibile risolvere la/le destinazione(i) della relazione: {0}. Correggi il titolo del compito e riprova.",
   "Task created in Lynvo.": "Compito creato in Lynvo.",
   "No file is currently open.": "Nessun file è attualmente aperto.",
   "Lynvo can only promote TODOs in files inside the workspace.": "Lynvo può promuovere solo i TODO nei file all'interno dello spazio di lavoro.",
@@ -32,7 +33,7 @@
   "Show pending conflicts of synchronization": "Mostra i conflitti di sincronizzazione in sospeso",
   "Manage the board's labels": "Gestisci le etichette del tabellone",
   "Create a new quick task": "Crea un nuovo compito rapido",
-  "Promote the selected comments marked with TODO/IDEA/FIXME as tasks": "Promuovi i commenti selezionati contrassegnati con TODO/IDEA/FIXME come compiti",
+  "Promote the selected comments marked with TODO/IDEA/FIXME as tasks. Select the whole TODO comment body to include it as an editable description.": "Promuovi i commenti selezionati contrassegnati con TODO/IDEA/FIXME come compiti. Seleziona l'intero corpo del commento TODO per includerlo come descrizione modificabile.",
   "Synchronize Lynvo with the remote lynvo-sync branch": "Sincronizza Lynvo con il branch remoto lynvo-sync",
   "Connect your locally assigned identity with your GitHub account": "Collega l'identità assegnata localmente al tuo account GitHub",
   "Install the Skill.MD file for coding agents (OpenCode, Claude Code, Cline, Cursor, or others)": "Installa il file Skill.MD per gli agenti di coding (OpenCode, Claude Code, Cline, Cursor o altri)",
@@ -226,5 +227,16 @@
   "Least used first": "Meno usate per prime",
   "{0} tasks": "{0} compiti",
   "A label with this name already exists.": "Esiste già un'etichetta con questo nome.",
-  "Sort labels by": "Ordina etichette per"
+  "Sort labels by": "Ordina etichette per",
+  "Code Linked": "Codice collegato",
+  "Code changed — click to copy it back to the board": "Codice modificato — fai clic per copiarlo di nuovo nella scheda",
+  "Code link": "Collegamento al codice",
+  "Code link broken — use Edit to convert this task": "Collegamento al codice interrotto — usa Modifica per convertire questa attività",
+  "Convert to normal task": "Converti in attività normale",
+  "Could not find the linked TODO comment in the code.": "Impossibile trovare il commento TODO collegato nel codice.",
+  "Could not write to the linked code file. The board was not updated — fix the file and try again.": "Impossibile scrivere nel file di codice collegato. La scheda non è stata aggiornata; correggi il file e riprova.",
+  "Synced with the linked code comment": "Sincronizzato con il commento di codice collegato",
+  "Task re-synced from code.": "Attività re-sincronizzata dal codice.",
+  "The code linked to this task could not be found (file deleted/renamed, or the marker removed). Convert this promoted task to a normal task? The link will be removed.": "Il codice collegato a questa attività non è stato trovato (file eliminato/rinominato o segnaposto rimosso). Convertire questa attività promossa in un'attività normale? Il collegamento verrà rimosso.",
+  "This task is linked to a TODO comment in your code. Editing the title or description here writes to that comment in place (unsaved changes are respected). If you edit the comment in the code instead, the link goes stale — click the chain icon next to the title to re-sync it back to the board.": "Questa attività è collegata a un commento TODO nel tuo codice. Modificare il titolo o la descrizione qui scrive in quel commento in loco (le modifiche non salvate vengono rispettate). Se modifichi il commento nel codice, il collegamento non è più valido: fai clic sull'icona della catena accanto al titolo per risincronizzarla con la scheda."
 }

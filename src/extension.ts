@@ -7,13 +7,16 @@ import { GitService } from "./providers/GitService";
 import { SkillInstaller } from "./providers/SkillInstaller";
 import { CodeReference } from "./types";
 import {
-  appendMarker,
-  deriveTitle,
+  buildPromotedComment,
   generateTodoId,
   isTodoCommentLine,
   lineHasMarker,
+  parseTodoSelection,
+  resolveRelationTarget,
+  getTodoCommentEndIndex,
   TODO_KEYWORDS,
 } from "./providers/TodoTracker";
+import type { TodoBodyRelation, TodoCommentPayload } from "./providers/TodoTracker";
 import {
   getAvailableLanguages,
   getLanguageDisplayName,
@@ -103,23 +106,65 @@ async function promoteTodo(): Promise<void> {
    }
 
    const filePath = vscode.workspace.asRelativePath(editor.document.uri);
+   const docLines = editor.document.getText().split("\n");
+   const board = (await DataManager.loadBoard()) || { version: "", columns: {}, tasks: {} };
 
-   const prepared = candidates.map((candidate) => ({
+   // Parse each candidate's full comment (title, description, checklist, relations).
+   type PreparedTodo = {
+     lineIndex: number;
+     todoId: string;
+     payload: TodoCommentPayload;
+     resolvedRelations: TodoBodyRelation[];
+   };
+   const prepared: PreparedTodo[] = candidates.map((candidate) => ({
      lineIndex: candidate.lineIndex,
      todoId: generateTodoId(),
-     title: deriveTitle(candidate.text),
-     description: candidate.text.trim(),
+     payload: parseTodoSelection(docLines, candidate.lineIndex),
+     resolvedRelations: [],
    }));
 
-   // Append each marker to its line through the live document (respects unsaved edits).
-   const edit = new vscode.WorkspaceEdit();
+   // Resolve every relation target to a task.
+   // If any cannot be resolved, abort the whole promotion (no partial writes)
+   // so the user can fix the title and retry.
+   const unresolved: string[] = [];
    for (const item of prepared) {
-     const line = editor.document.lineAt(item.lineIndex);
-     edit.replace(
-       editor.document.uri,
-       new vscode.Range(line.range.start, line.range.end),
-       appendMarker(line.text, item.todoId),
+     item.resolvedRelations = item.payload.relations.map((relation) => {
+       const target = resolveRelationTarget(board, relation.target);
+       if (!target) {
+         unresolved.push(relation.target);
+         return { type: relation.type, target: relation.target };
+       }
+       // The task id is the reliable link; the {Title} is cosmetic.
+       return { type: relation.type, target: `${target.taskId} {${target.title}}` };
+     });
+   }
+   if (unresolved.length > 0) {
+     vscode.window.showErrorMessage(
+       t("Could not resolve relation target(s): {0}. Fix the task title and promote again.", unresolved.join(", ")),
      );
+     return;
+   }
+
+   // Rebuild each comment (title + marker + body) and replace the old span.
+   // Process bottom-up so earlier line indices stay valid.
+   const edit = new vscode.WorkspaceEdit();
+   const ordered = prepared.slice().sort((a, b) => b.lineIndex - a.lineIndex);
+   for (const item of ordered) {
+     const startLine = editor.document.lineAt(item.lineIndex);
+     const endIndex = getTodoCommentEndIndex(docLines, item.lineIndex);
+     const endLine = editor.document.lineAt(endIndex);
+     const range = new vscode.Range(startLine.range.start, endLine.range.end);
+     const newLines = buildPromotedComment(
+       docLines[item.lineIndex],
+       item.todoId,
+       {
+         title: item.payload.title,
+         description: item.payload.description,
+         checklist: item.payload.checklist,
+         relations: item.resolvedRelations,
+       },
+     );
+     edit.replace(editor.document.uri, range, newLines.join("\n"));
    }
    const applied = await vscode.workspace.applyEdit(edit);
    if (!applied) {
@@ -136,12 +181,22 @@ async function promoteTodo(): Promise<void> {
      );
    });
 
-   // Create one task per promoted line, linked by the marker token.
+   // Create one task per promoted comment, linked by the marker token.
    for (const item of prepared) {
-     await DataManager.createTask(item.title, "" /* empty description for now */, undefined, [], {
-       filePath,
-       todoId: item.todoId,
-     });
+     await DataManager.createTask(
+       item.payload.title,
+       item.payload.description,
+       undefined,
+       [],
+       { filePath, todoId: item.todoId },
+       "medium",
+       undefined,
+       item.payload.checklist,
+       item.resolvedRelations.map((relation) => ({
+         type: relation.type,
+         targetTaskId: relation.target.split(" ")[0],
+       })),
+     );
    }
 
    const count = prepared.length;
@@ -464,6 +519,19 @@ export function activate(context: vscode.ExtensionContext) {
           vscode.window.showInformationMessage(detail);
         }
       }
+    }),
+  );
+
+  // While the board is open,
+  // react to edits in a linked source file (using the live, possibly-unsaved buffer)
+  // so the chain-link state stays current.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (!LynvoPanel.currentPanel) {return;}
+      const folder = vscode.workspace.getWorkspaceFolder(event.document.uri);
+      if (!folder) {return;}
+      const rel = vscode.workspace.asRelativePath(event.document.uri, false);
+      LynvoPanel.scheduleCodeLinkStateRefresh(rel);
     }),
   );
 }

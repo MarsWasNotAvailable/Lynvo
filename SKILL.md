@@ -84,8 +84,9 @@ interface LynvoTask {
   dueDate?: number;                    // Unix timestamp in milliseconds
   codeReference?: {                    // Link to source code location
     filePath: string;                  // Relative path from workspace root
-    lineStart: number;                 // 1-based line number
-    lineEnd: number;                   // 1-based line number
+    todoId?: string;                   // Unique Lynvo TODO marker token embedded in the file (preferred)
+    lineStart?: number;                // Legacy 1-based line number (backward compatibility only)
+    lineEnd?: number;                  // Legacy 1-based line number (backward compatibility only)
   };
   checklist?: LynvoChecklistItem[];
   relations?: LynvoTaskRelation[];
@@ -142,8 +143,10 @@ interface LynvoActivity {
 
 ### LynvoActivityType Values
 
-Message format convention:
-`"left" <=> "right"` is marking relations between two items;
+Message format convention (all relation/state symbols are 3-char for easy global search):
+`"task" <+> "task"` is adding a relation between two tasks;
+`"task" <-> "task"` is removing a relation between two tasks;
+`"task" <=> "task"` is the generic catch-all meaning "these two tasks are related";
 `"old"  ==> "new"` is a state change (a rename);
 `"task" ::: "item"` is membership (an item on its task).
 Column items are wrapped with square brackets : [...] .
@@ -176,14 +179,14 @@ Anything else would be wrapped with quotes : “...” .
 | `checklist_completed` | Checklist item marked done, shown as `"task" ::: item` |
 | `checklist_reopened` | Checklist item marked not-done (reopened), shown as `"task" ::: item` |
 | `checklist_deleted` | Checklist item removed from task |
-| `relation_added` | "related" relation created (legacy catch-all for relations), shown as `"task" <=> "task"` |
-| `relation_deleted` | "related" relation removed (legacy catch-all for relations), shown as `"task" !=! "task"` |
-| `relation_block_added` | "blocks" relation created, shown as `"task" <=> "task"` |
-| `relation_block_deleted` | "blocks" relation removed, shown as `"task" !=! "task"` |
-| `relation_blockedby_added` | "blocked-by" relation created, shown as `"task" <=> "task"` |
-| `relation_blockedby_deleted` | "blocked-by" relation removed, shown as `"task" !=! "task"` |
-| `relation_duplicates_added` | "duplicates" relation created, shown as `"task" <=> "task"` |
-| `relation_duplicates_deleted` | "duplicates" relation removed, shown as `"task" !=! "task"` |
+| `relation_added` | "related" relation created (legacy catch-all for relations), shown as `"task" <+> "task"` |
+| `relation_deleted` | "related" relation removed (legacy catch-all for relations), shown as `"task" <-> "task"` |
+| `relation_block_added` | "blocks" relation created, shown as `"task" <+> "task"` |
+| `relation_block_deleted` | "blocks" relation removed, shown as `"task" <-> "task"` |
+| `relation_blockedby_added` | "blocked-by" relation created, shown as `"task" <+> "task"` |
+| `relation_blockedby_deleted` | "blocked-by" relation removed, shown as `"task" <-> "task"` |
+| `relation_duplicates_added` | "duplicates" relation created, shown as `"task" <+> "task"` |
+| `relation_duplicates_deleted` | "duplicates" relation removed, shown as `"task" <-> "task"` |
 
 Note: the three `*_updated` types above are kept only for backward compatibility with existing activity logs, or at worse a default cases where the specific types cannot be specified;
 Any new activity should uses the specific `*_renamed` / `column_color_changed` types.
@@ -314,7 +317,7 @@ If a task's `status` references a deleted column, it is reassigned to the leftmo
 | Command | Purpose |
 |---|---|
 | `lynvo.quickCreateTask` | Create task via interactive input prompts |
-| `lynvo.promoteTodo` | Promote selected TODO/IDEA/FIXME lines into tasks (each gets a unique marker + codeReference) |
+| `lynvo.promoteTodo` | Promote selected TODO/IDEA/FIXME comments into tasks (each gets a unique marker + `codeReference.todoId`); the comment body is captured as the task's editable description, and any `[ ]`/`[x]` checklist items and `[!]`/`[&]`/`[|]`/`[=]` relation lines become the task's checklist and relations |
 | `lynvo.openBoard` | Open the Kanban board webview |
 | `lynvo.openTable` | Open the table view webview |
 | `lynvo.openActivity` | Open the activity feed webview |
@@ -430,6 +433,51 @@ When VS Code commands are unavailable, follow these recipes exactly. Always read
 | Create column | Reuse an existing case-insensitive column title first. If creating, add a `col-*` entry to `columns.json` with deterministic `position` and add `column_created` activity. |
 | Create label | Reuse an existing case-insensitive label name first. If creating, add a `label-*` entry under `board.json.labels` and add `label_created` activity. |
 | Resolve conflict | Update the task field only when choosing or synthesizing a new value, set the conflict's `resolved` to `true`, update sync metadata to `conflict` if unresolved conflicts remain or `pending` if all are resolved. Do not invent an activity type for conflict resolution. |
+
+## Promoted TODO ↔ Board Two-Way Binding
+
+When a task is created by promoting an in-code TODO comment (`lynvo.promoteTodo`), its `title`, `description`, **checklist**, and **relations** are **bound** to that comment (located by the unique `codeReference.todoId` marker). The board and the code stay editable in both directions. A chain-link icon next to the task's **Edit/Delete buttons** reflects one of three link states:
+
+| State | Color | Meaning | UI affordance |
+|---|---|---|---|
+| **Synced** | green | The code comment matches the task's data. | Hover: "Synced with the linked code comment". |
+| **Diverged** | orange | The marker is still present but the comment text in code differs from the board. | Click the chain icon → **relink**: copy the code comment back to the board. |
+| **Broken** | red | The file was deleted/renamed, or the marker was removed. | Click **Edit** → prompted to **convert to a normal task** (removes the link). Editing is refused until fixed. |
+
+### In-code comment body format
+
+The comment body (the lines after the title line) may contain plain description text, then checklist items, then relations — in that order:
+
+- **Checklist** — `[ ]` unchecked, `[x]` checked.
+- **Relations** — `[!]` blocked-by, `[&]` related, `[|]` blocks, `[=]` duplicates. The target is a task, written as `{Title}` (matched case-insensitively); a bare task id or another task's `lynvo-todo-…` marker is also accepted. On promotion each relation line is rewritten to `task-id {Title}` so the link stays reliable after renames.
+
+Example (block comment):
+
+```
+/* TODO : This is the task title lynvo-todo-mts4s2tm-jcq45w8q
+* This is a very descriptive description
+* that spans on several lines.
+* [ ] Checklist item that needs to be completed
+* [x] Checklist item that has been completed
+* [!] task-mtlcf182-jgtw9fuw {Fix Renderer}
+* [&] task-mto3l42t-5jicqd1n {Another Task}
+*/
+```
+
+Both **block** comments (`/* */`, `<!-- -->`, `--[[ ]]`) and **single-line** comments (`//`, `#`, `;`) are supported; single-line comments keep a per-line prefix and are **never** converted to block comments (respecting languages without block syntax, e.g. bash/R/Python).
+
+### Rules
+
+- **Board → Code (primary):** saving a linked task (title, description, checklist, or relations) writes the in-code TODO comment **first**, to the open (possibly unsaved) buffer — it never forces a save. If that write fails, the board is **not** updated, so the user can fix the file and retry.
+- **Code → Board (user-controlled):** the board keeps showing the JSON until the user relinks. Divergence is detected on board load/refresh/reveal and via a debounced editor-change event while the board is open. There is **no** background file watcher and **no** implicit file→JSON write.
+- **Broken task:** the red indicator is informational only; the convert-to-normal prompt appears **only when the user clicks Edit**. Cancelling leaves the task unchanged.
+- **Opt-out:** the setting `lynvo.enableInCodeEditing` (default `true`) gates all board → code propagation. When disabled, editing a linked task updates the board only and leaves the code comment untouched.
+
+### Agent notes
+
+- When a task has a `codeReference.todoId`, treat the **title** as the comment's first line (minus the marker) and the **description** as the comment body (before any `[ ]`/`[x]`/relation lines), and keep them in sync with the code.
+- Do **not** hand-edit the marker token (`lynvo-todo-…`); it is what binds the task to its comment.
+- To drop the link without deleting the task, use "Remove line" (removes the whole TODO comment, keeps the task on the board) or convert a broken task to a normal task.
 
 ## Markdown Description Format
 

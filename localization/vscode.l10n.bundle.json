@@ -1,4 +1,5 @@
 {
+  "Could not resolve relation target(s): {0}. Fix the task title and promote again.": "Could not resolve relation target(s): {0}. Fix the task title and promote again.",
   "Task created in Lynvo.": "Task created in Lynvo.",
   "No file is currently open.": "No file is currently open.",
   "Lynvo can only promote TODOs in files inside the workspace.": "Lynvo can only promote TODOs in files inside the workspace.",
@@ -32,7 +33,7 @@
   "Show pending conflicts of synchronization": "Show pending conflicts of synchronization",
   "Manage the board's labels": "Manage the board's labels",
   "Create a new quick task": "Create a new quick task",
-  "Promote the selected comments marked with TODO/IDEA/FIXME as tasks": "Promote the selected comments marked with TODO/IDEA/FIXME as tasks",
+  "Promote the selected comments marked with TODO/IDEA/FIXME as tasks. Select the whole TODO comment body to include it as an editable description.": "Promote the selected comments marked with TODO/IDEA/FIXME as tasks. Select the whole TODO comment body to include it as an editable description.",
   "Synchronize Lynvo with the remote lynvo-sync branch": "Synchronize Lynvo with the remote lynvo-sync branch",
   "Connect your locally assigned identity with your GitHub account": "Connect your locally assigned identity with your GitHub account",
   "Install the Skill.MD file for coding agents (OpenCode, Claude Code, Cline, Cursor, or others)": "Install the Skill.MD file for coding agents (OpenCode, Claude Code, Cline, Cursor, or others)",
@@ -226,5 +227,16 @@
   "Least used first": "Least used first",
   "{0} tasks": "{0} tasks",
   "A label with this name already exists.": "A label with this name already exists.",
-  "Sort labels by": "Sort labels by"
+  "Sort labels by": "Sort labels by",
+  "Code Linked": "Code Linked",
+  "Code changed — click to copy it back to the board": "Code changed — click to copy it back to the board",
+  "Code link": "Code link",
+  "Code link broken — use Edit to convert this task": "Code link broken — use Edit to convert this task",
+  "Convert to normal task": "Convert to normal task",
+  "Could not find the linked TODO comment in the code.": "Could not find the linked TODO comment in the code.",
+  "Could not write to the linked code file. The board was not updated — fix the file and try again.": "Could not write to the linked code file. The board was not updated — fix the file and try again.",
+  "Synced with the linked code comment": "Synced with the linked code comment",
+  "Task re-synced from code.": "Task re-synced from code.",
+  "The code linked to this task could not be found (file deleted/renamed, or the marker removed). Convert this promoted task to a normal task? The link will be removed.": "The code linked to this task could not be found (file deleted/renamed, or the marker removed). Convert this promoted task to a normal task? The link will be removed.",
+  "This task is linked to a TODO comment in your code. Editing the title or description here writes to that comment in place (unsaved changes are respected). If you edit the comment in the code instead, the link goes stale — click the chain icon next to the title to re-sync it back to the board.": "This task is linked to a TODO comment in your code. Editing the title or description here writes to that comment in place (unsaved changes are respected). If you edit the comment in the code instead, the link goes stale — click the chain icon next to the title to re-sync it back to the board."
 }

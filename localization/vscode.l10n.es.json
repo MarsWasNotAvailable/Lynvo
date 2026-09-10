@@ -1,4 +1,5 @@
 {
+  "Could not resolve relation target(s): {0}. Fix the task title and promote again.": "No se pudo resolver el/los destino(s) de la relación: {0}. Corrige el título de la tarea e inténtalo de nuevo.",
   "Task created in Lynvo.": "Tarea creada en Lynvo.",
   "No file is currently open.": "No hay ningún archivo abierto actualmente.",
   "Lynvo can only promote TODOs in files inside the workspace.": "Lynvo solo puede promover TODO en archivos dentro del área de trabajo.",
@@ -32,7 +33,7 @@
   "Show pending conflicts of synchronization": "Mostrar conflictos pendientes de sincronización",
   "Manage the board's labels": "Administra las etiquetas del tablero",
   "Create a new quick task": "Crear una nueva tarea rápida",
-  "Promote the selected comments marked with TODO/IDEA/FIXME as tasks": "Promueve los comentarios seleccionados marcados con TODO/IDEA/FIXME como tareas",
+  "Promote the selected comments marked with TODO/IDEA/FIXME as tasks. Select the whole TODO comment body to include it as an editable description.": "Promueve los comentarios seleccionados marcados con TODO/IDEA/FIXME como tareas. Selecciona el cuerpo completo del comentario TODO para incluirlo como una descripción editable.",
   "Synchronize Lynvo with the remote lynvo-sync branch": "Sincroniza Lynvo con la rama remota lynvo-sync",
   "Connect your locally assigned identity with your GitHub account": "Conecta tu identidad asignada localmente con tu cuenta de GitHub",
   "Install the Skill.MD file for coding agents (OpenCode, Claude Code, Cline, Cursor, or others)": "Instala el archivo Skill.MD para agentes de código (OpenCode, Claude Code, Cline, Cursor u otros)",
@@ -226,5 +227,16 @@
   "Least used first": "Menos usadas primero",
   "{0} tasks": "{0} tareas",
   "A label with this name already exists.": "Ya existe una etiqueta con este nombre.",
-  "Sort labels by": "Ordenar etiquetas por"
+  "Sort labels by": "Ordenar etiquetas por",
+  "Code Linked": "Código vinculado",
+  "Code changed — click to copy it back to the board": "Código modificado — haz clic para copiarlo de nuevo en el tablero",
+  "Code link": "Enlace de código",
+  "Code link broken — use Edit to convert this task": "Enlace de código roto — usa Editar para convertir esta tarea",
+  "Convert to normal task": "Convertir en tarea normal",
+  "Could not find the linked TODO comment in the code.": "No se encontró el comentario TODO vinculado en el código.",
+  "Could not write to the linked code file. The board was not updated — fix the file and try again.": "No se pudo escribir en el archivo de código vinculado. El tablero no se actualizó; corrige el archivo e inténtalo de nuevo.",
+  "Synced with the linked code comment": "Sincronizado con el comentario de código vinculado",
+  "Task re-synced from code.": "Tarea re-sincronizada desde el código.",
+  "The code linked to this task could not be found (file deleted/renamed, or the marker removed). Convert this promoted task to a normal task? The link will be removed.": "El código vinculado a esta tarea no se pudo encontrar (archivo eliminado/renombrado, o el marcador eliminado). ¿Convertir esta tarea promovida en una tarea normal? El enlace se eliminará.",
+  "This task is linked to a TODO comment in your code. Editing the title or description here writes to that comment in place (unsaved changes are respected). If you edit the comment in the code instead, the link goes stale — click the chain icon next to the title to re-sync it back to the board.": "Esta tarea está vinculada a un comentario TODO en tu código. Editar el título o la descripción aquí escribe en ese comentario en su lugar (los cambios no guardados se respetan). Si editas el comentario en el código, el enlace queda desactualizado; haz clic en el icono de cadena junto al título para re-sincronizarlo con el tablero."
 }

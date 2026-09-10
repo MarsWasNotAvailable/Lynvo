@@ -64,7 +64,7 @@ export class LynvoMenuProvider
     {
       label: "Promote TODO to Task",
       command: "lynvo.promoteTodo",
-      tooltip: "Promote the selected comments marked with TODO/IDEA/FIXME as tasks",
+      tooltip: "Promote the selected comments marked with TODO/IDEA/FIXME as tasks. Select the whole TODO comment body to include it as an editable description.",
       icon: "code",
     },
     {

@@ -69,6 +69,8 @@ type WebviewOutboundMessage =
       lineEnd?: number;
     }
   | { command: "deleteTodoLine"; taskId: string }
+  | { command: "relinkTodo"; taskId: string }
+  | { command: "convertBrokenTask"; taskId: string }
   | { command: "removeCodeRefsForColumn"; colId: string };
 
 declare const acquireVsCodeApi: () => {
@@ -182,6 +184,25 @@ const iconButtonStyle: React.CSSProperties = {
   justifyContent: "center",
 };
 
+// Chain-link glyph marking a task that is promoted / linked to a TODO comment in code.
+const LinkIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+  </svg>
+);
+
 type LynvoView = "board" | "table" | "activity" | "conflicts" | "insights" | "labels";
 
 type Priority = "low" | "medium" | "high";
@@ -208,8 +229,11 @@ const mapZoomStep = 0.15;
 const clampMapZoom = (value: number): number =>
   Math.max(minMapZoom, Math.min(maxMapZoom, Math.round(value * 100) / 100));
 
+type CodeLinkState = "synced" | "diverged" | "broken";
+
 type WebviewInboundMessage =
-  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean }
+  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState> }
+  | { command: "setCodeLinkStates"; states: Record<string, CodeLinkState> }
   | { command: "setRemotePending"; pending: boolean }
   | { command: "switchView"; view: LynvoView }
   | { command: "setLanguage"; bundle: l10nJsonFormat };
@@ -232,7 +256,11 @@ const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
       command: "loadData",
       data: (value.data as LynvoBoard | null) || null,
       remotePending: value.remotePending === true,
+      codeLinkStates: (value.codeLinkStates as Record<string, CodeLinkState> | undefined) || {},
     };
+  }
+  if (value.command === "setCodeLinkStates") {
+    return { command: "setCodeLinkStates", states: (value.states as Record<string, CodeLinkState>) || {} };
   }
   if (value.command === "setRemotePending") {
     return { command: "setRemotePending", pending: value.pending === true };
@@ -491,6 +519,9 @@ const lynvoStyles = `
     --lynvo-panel-strong: var(--vscode-editorWidget-background, #1f242c);
     --lynvo-card-bg: var(--vscode-editor-background, #0d1117);
     --lynvo-hover: var(--vscode-list-hoverBackground, #1f2937);
+    --lynvo-code-link: var(--vscode-editorComment-foreground, #3fb950);
+    --lynvo-code-link-broken: var(--vscode-editorError-foreground, #f85149);
+    --lynvo-code-link-diverged: var(--vscode-editorWarning-foreground, #d29922);
     --lynvo-radius: 8px;
   }
 
@@ -1008,6 +1039,7 @@ export const App: React.FC = () => {
   const [activityUserFilter, setActivityUserFilter] = useState<string>("");
   const [isSyncing, setIsSyncing] = useState(false);
   const [remotePending, setRemotePending] = useState(false);
+  const [codeLinkStates, setCodeLinkStates] = useState<Record<string, CodeLinkState>>({});
 
   const [addingTaskColId, setAddingTaskColId] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
@@ -1075,6 +1107,11 @@ export const App: React.FC = () => {
         setBoardData(message.data);
         setIsSyncing(false);
         setRemotePending(Boolean(message.remotePending));
+        setCodeLinkStates(message.codeLinkStates || {});
+      }
+
+      if (message.command === "setCodeLinkStates") {
+        setCodeLinkStates(message.states);
       }
 
       if (message.command === "setRemotePending") {
@@ -1382,6 +1419,13 @@ export const App: React.FC = () => {
   };
 
   const startEditingTask = (task: LynvoTask) => {
+    // A promoted task whose link is broken (file or marker gone)
+    // can not be edited until it's fixed;
+    // offer to convert it to a normal task instead.
+    if (task.codeReference?.todoId && codeLinkStates[task.id] === "broken") {
+      vscode.postMessage({ command: "convertBrokenTask", taskId: task.id });
+      return;
+    }
     setEditingTaskId(task.id);
     setEditTitle(task.title);
     setEditDesc(task.description);
@@ -1739,6 +1783,7 @@ export const App: React.FC = () => {
 
   const renderTaskCard = (task: LynvoTask) => {
     const isEditing = editingTaskId === task.id;
+    const isCodeLinked = Boolean(task.codeReference?.todoId);
     const isEdited = task.updatedAt - task.createdAt > 60000;
     const priority = getTaskPriority(task);
     const dueDate = task.dueDate;
@@ -1785,14 +1830,14 @@ export const App: React.FC = () => {
               autoFocus
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
-              style={{ width: "100%", marginBottom: "8px", padding: "6px", boxSizing: "border-box" }}
+              style={{ width: "100%", marginBottom: "8px", padding: "6px", boxSizing: "border-box", ...(isCodeLinked ? { outline: "2px solid var(--lynvo-code-link)", outlineOffset: "1px" } : {}) }}
             />
             <textarea
               placeholder={t("Write a description of the task here")}
               value={editDesc}
               onChange={(e) => setEditDesc(e.target.value)}
               rows={3}
-              style={{ width: "100%", marginBottom: "8px", padding: "6px", boxSizing: "border-box" }}
+              style={{ width: "100%", marginBottom: "8px", padding: "6px", boxSizing: "border-box", ...(isCodeLinked ? { outline: "2px solid var(--lynvo-code-link)", outlineOffset: "1px" } : {}) }}
             />
             <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
               <select
@@ -1991,16 +2036,35 @@ export const App: React.FC = () => {
                 display: "flex",
                 gap: "10px",
                 justifyContent: "flex-end",
+                alignItems: "center",
                 borderTop: "1px solid var(--vscode-widget-border)",
                 marginTop: "12px",
                 paddingTop: "10px",
               }}
             >
+              {isCodeLinked && (
+                <span
+                  style={{
+                    marginRight: "auto",
+                    color: "var(--lynvo-code-link)",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    cursor: "help",
+                  }}
+                  title={t("This task is linked to a TODO comment in your code. Editing the title or description here writes to that comment in place (unsaved changes are respected). If you edit the comment in the code instead, the link goes stale — click the chain icon next to the title to re-sync it back to the board.")}
+                >
+                  {t("Code Linked")}
+                  <LinkIcon />
+                </span>
+              )}
               <button onClick={cancelEditTask}>{t("Cancel")}</button>
               <button
                 onClick={saveEditTask}
                 style={{
-                  backgroundColor: "var(--vscode-button-background)",
+                  backgroundColor: isCodeLinked ? "var(--lynvo-code-link)" : "var(--vscode-button-background)",
                   color: "white",
                   border: "none",
                   padding: "4px 8px",
@@ -2017,13 +2081,43 @@ export const App: React.FC = () => {
                 style={{
                   margin: "0 0 8px 0",
                   fontSize: "14px",
-                  paddingRight: "40px",
+                  paddingRight: "88px",
                   color: "var(--vscode-editor-foreground)",
                 }}
               >
                 {task.title}
               </h4>
-              <div style={{ position: "absolute", top: "8px", right: "8px", display: "flex", gap: "2px" }}>
+              <div style={{ position: "absolute", top: "8px", right: "8px", display: "flex", gap: "2px", alignItems: "center" }}>
+                {isCodeLinked && (
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    style={{
+                      ...iconButtonStyle,
+                      color:
+                        codeLinkStates[task.id] === "broken"
+                          ? "var(--lynvo-code-link-broken)"
+                          : codeLinkStates[task.id] === "diverged"
+                            ? "var(--lynvo-code-link-diverged)"
+                            : "var(--lynvo-code-link)",
+                    }}
+                    onClick={() => {
+                      if (codeLinkStates[task.id] === "diverged") {
+                        vscode.postMessage({ command: "relinkTodo", taskId: task.id });
+                      }
+                    }}
+                    title={
+                      codeLinkStates[task.id] === "diverged"
+                        ? t("Code changed — click to copy it back to the board")
+                        : codeLinkStates[task.id] === "broken"
+                          ? t("Code link broken — use Edit to convert this task")
+                          : t("Synced with the linked code comment")
+                    }
+                    aria-label={t("Code link")}
+                  >
+                    <LinkIcon />
+                  </button>
+                )}
 	                <button className="icon-btn" onClick={() => startEditingTask(task)} title={t("Edit")} aria-label={t("Edit")} style={iconButtonStyle}><EditIcon /></button>
                 <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteTask", taskId: task.id })} title={t("Delete")} aria-label={t("Delete")} style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
               </div>

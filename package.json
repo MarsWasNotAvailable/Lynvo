@@ -137,6 +137,11 @@
           "type": "string",
           "default": "auto",
           "description": "%configuration.language.description%"
+        },
+        "lynvo.enableInCodeEditing": {
+          "type": "boolean",
+          "default": true,
+          "description": "%configuration.inCodeEditing.description%"
         }
       }
     }

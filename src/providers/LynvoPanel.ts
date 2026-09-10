@@ -2,12 +2,56 @@ import * as vscode from "vscode";
 import { DataManager } from "./DataManager";
 import { GitService } from "./GitService";
 import { getWebviewBundle, t } from "../l10n";
-import { LynvoTaskRelationType } from "../types";
+import { LynvoBoard, LynvoTaskRelationType } from "../types";
 import {
   findMarkerLineIndex,
+  isInCodeEditingEnabled,
+  readTodoComment,
   removeMarkerFromFile,
   removeTodoCommentFromFile,
+  replaceTodoComment,
 } from "./TodoTracker";
+import type { TodoBodyChecklistItem, TodoCommentPayload } from "./TodoTracker";
+
+/** State of a promoted task's link to its in-code TODO comment. */
+type CodeLinkState = "synced" | "diverged" | "broken";
+
+/**
+ * For every linked task, read the linked file (live buffer or disk)
+ * and classify the link:
+ * `synced` (file matches the board),
+ * `diverged` (marker present but text differs),
+ * `broken` (file or marker no longer found).
+ */
+async function computeCodeLinkStates(
+  board: LynvoBoard | null,
+): Promise<Record<string, CodeLinkState>> {
+  const states: Record<string, CodeLinkState> = {};
+  if (!board) {return states;}
+  const linked = Object.values(board.tasks).filter(
+    (task) =>
+      task.codeReference?.todoId &&
+      task.codeReference?.filePath &&
+      isSafeWorkspaceRelativePath(task.codeReference.filePath),
+  );
+  await Promise.all(
+    linked.map(async (task) => {
+      const parsed = await readTodoComment(
+        task.codeReference!.filePath!,
+        task.codeReference!.todoId!,
+      );
+      if (!parsed) {
+        states[task.id] = "broken";
+        return;
+      }
+      states[task.id] =
+        parsed.title === task.title && parsed.description === task.description
+          ? "synced"
+          : "diverged";
+    }),
+  );
+  return states;
+}
 
 type LynvoView =
   | "board"
@@ -94,6 +138,53 @@ const isSafeWorkspaceRelativePath = (filePath: string): boolean =>
   !filePath.startsWith("\\") &&
   !filePath.includes("..") &&
   !/^[a-zA-Z]:[\\/]/.test(filePath);
+
+/** Board-side relation (type + target task id). */
+type BoardRelation = { type: LynvoTaskRelationType; targetTaskId: string };
+
+const CODE_SYNC_ERROR =
+  "Could not write to the linked code file. The board was not updated — fix the file and try again.";
+
+/**
+ * Propagate a linked task's comment content (title, description,
+ * and the given or current checklist/relations) to the in-code TODO comment,
+ * writing the live/unsaved buffer when available (never forcing a save).
+ * Returns false when the file could not be written, so the caller can abort.
+ * Note : Also returns true (after doing nothing) when the task is not code-linked.
+ */
+async function syncLinkedTaskToCode(
+  board: LynvoBoard,
+  taskId: string,
+  override?: {
+    title?: string;
+    description?: string;
+    checklist?: TodoBodyChecklistItem[];
+    relations?: BoardRelation[];
+  },
+): Promise<boolean> {
+  const task = board.tasks[taskId];
+  const { todoId, filePath } = task?.codeReference || {};
+  if (!todoId || !filePath || !isSafeWorkspaceRelativePath(filePath)) {
+    return true;
+  }
+  if (!isInCodeEditingEnabled()) {
+    return true;
+  }
+  const checklist =
+    override?.checklist ??
+    (task.checklist || []).map((entry) => ({ text: entry.text, done: entry.done }));
+  const relations = override?.relations ?? (task.relations || []);
+  const payload: TodoCommentPayload = {
+    title: override?.title ?? task.title,
+    description: override?.description ?? task.description,
+    checklist,
+    relations: relations.map((relation) => ({
+      type: relation.type,
+      target: `${relation.targetTaskId} {${board.tasks[relation.targetTaskId]?.title || relation.targetTaskId}}`,
+    })),
+  };
+  return await replaceTodoComment(filePath, todoId, payload);
+}
 
 const asTaskReorderUpdates = (
   value: unknown,
@@ -187,12 +278,48 @@ export class LynvoPanel {
   public static async refreshData() {
     if (LynvoPanel.currentPanel) {
       const board = await DataManager.loadBoard();
+      const codeLinkStates = await computeCodeLinkStates(board);
       LynvoPanel.currentPanel._panel.webview.postMessage({
         command: "loadData",
         data: board,
+        codeLinkStates,
         remotePending: GitService.getRemotePending(),
       });
     }
+  }
+
+  private static _stateRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Debounced re-check of the code-link states after a linked file changes. */
+  public static scheduleCodeLinkStateRefresh(relPath: string): void {
+    if (LynvoPanel._stateRefreshTimer) {
+      clearTimeout(LynvoPanel._stateRefreshTimer);
+    }
+    LynvoPanel._stateRefreshTimer = setTimeout(() => {
+      LynvoPanel._stateRefreshTimer = undefined;
+      void LynvoPanel.refreshCodeLinkStatesFor(relPath);
+    }, 400);
+  }
+
+  /** Re-check the link state of a specific linked file and push it to the webview. */
+  public static async refreshCodeLinkStatesFor(relPath: string): Promise<void> {
+    if (!LynvoPanel.currentPanel) {return;}
+    const board = await DataManager.loadBoard();
+    const linkedFiles = new Set(
+      Object.values(board?.tasks || {})
+        .filter(
+          (task) =>
+            task.codeReference?.filePath &&
+            isSafeWorkspaceRelativePath(task.codeReference.filePath),
+        )
+        .map((task) => task.codeReference!.filePath),
+    );
+    if (!linkedFiles.has(relPath)) {return;}
+    const codeLinkStates = await computeCodeLinkStates(board);
+    LynvoPanel.currentPanel._panel.webview.postMessage({
+      command: "setCodeLinkStates",
+      states: codeLinkStates,
+    });
   }
 
   public static postRemotePending(pending: boolean): void {
@@ -248,7 +375,8 @@ export class LynvoPanel {
         switch (message.command) {
           case "requestData": {
             const board = await DataManager.loadBoard();
-            webview.postMessage({ command: "loadData", data: board });
+            const codeLinkStates = await computeCodeLinkStates(board);
+            webview.postMessage({ command: "loadData", data: board, codeLinkStates });
             return;
           }
           case "updateTaskStatus": {
@@ -290,13 +418,38 @@ export class LynvoPanel {
           case "editTask": {
             const taskId = asString(message.taskId);
             const title = asString(message.title);
+            const description = asString(message.description) || "";
             if (!taskId || !title) {
               return;
             }
+
+            // For a promoted task, the title/description are bound
+            // to the in-code TODO comment.
+            // Write the code FIRST (live buffer, no forced save);
+            // if that fails,
+            // do not touch the board so the user can fix the file and retry.
+            const board = await DataManager.loadBoard();
+            const task = board?.tasks[taskId];
+            const todoId = task?.codeReference?.todoId;
+            const filePath = task?.codeReference?.filePath;
+            const isLinked = Boolean(
+              todoId && filePath && isSafeWorkspaceRelativePath(filePath),
+            );
+            const textChanged =
+              isLinked &&
+              ((task!.title !== title) || (task!.description !== description));
+            if (textChanged) {
+              const ok = await syncLinkedTaskToCode(board!, taskId, { title, description });
+              if (!ok) {
+                vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
+                return;
+              }
+            }
+
             await DataManager.editTask(
               taskId,
               title,
-              asString(message.description) || "",
+              description,
               asStringArray(message.labelIds),
               asPriority(message.priority),
               asNumber(message.dueDate),
@@ -426,6 +579,22 @@ export class LynvoPanel {
             if (!taskId || !text) {
               return;
             }
+            const board = await DataManager.loadBoard();
+            const task = board?.tasks[taskId];
+            if (board && task) {
+              const checklist = [
+                ...(task.checklist || []).map((entry) => ({ text: entry.text, done: entry.done })),
+                { text: text.trim(), done: false },
+              ];
+              const ok = await syncLinkedTaskToCode(board, taskId, {
+                checklist,
+                relations: (task.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId })),
+              });
+              if (!ok) {
+                vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
+                return;
+              }
+            }
             await DataManager.addChecklistItem(taskId, text);
             LynvoPanel.refreshDataAndScheduleSync();
             return;
@@ -436,9 +605,31 @@ export class LynvoPanel {
             if (!taskId || !itemId) {
               return;
             }
+            const newText = asString(message.text);
+            const newDone = asBoolean(message.done);
+            const board = await DataManager.loadBoard();
+            const task = board?.tasks[taskId];
+            if (board && task) {
+              const checklist = (task.checklist || []).map((entry) =>
+                entry.id === itemId
+                  ? {
+                      text: typeof newText === "string" ? newText.trim() : entry.text,
+                      done: typeof newDone === "boolean" ? newDone : entry.done,
+                    }
+                  : { text: entry.text, done: entry.done },
+              );
+              const ok = await syncLinkedTaskToCode(board, taskId, {
+                checklist,
+                relations: (task.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId })),
+              });
+              if (!ok) {
+                vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
+                return;
+              }
+            }
             await DataManager.updateChecklistItem(taskId, itemId, {
-              text: asString(message.text),
-              done: asBoolean(message.done),
+              text: newText,
+              done: newDone,
             });
             LynvoPanel.refreshDataAndScheduleSync();
             return;
@@ -448,6 +639,21 @@ export class LynvoPanel {
             const itemId = asString(message.itemId);
             if (!taskId || !itemId) {
               return;
+            }
+            const board = await DataManager.loadBoard();
+            const task = board?.tasks[taskId];
+            if (board && task) {
+              const checklist = (task.checklist || [])
+                .filter((entry) => entry.id !== itemId)
+                .map((entry) => ({ text: entry.text, done: entry.done }));
+              const ok = await syncLinkedTaskToCode(board, taskId, {
+                checklist,
+                relations: (task.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId })),
+              });
+              if (!ok) {
+                vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
+                return;
+              }
             }
             await DataManager.deleteChecklistItem(taskId, itemId);
             LynvoPanel.refreshDataAndScheduleSync();
@@ -459,6 +665,22 @@ export class LynvoPanel {
             const relationType = asRelationType(message.relationType);
             if (!taskId || !targetTaskId || !relationType) {
               return;
+            }
+            const board = await DataManager.loadBoard();
+            const task = board?.tasks[taskId];
+            if (board && task) {
+              const relations = [
+                ...(task.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId })),
+                { type: relationType, targetTaskId },
+              ];
+              const ok = await syncLinkedTaskToCode(board, taskId, {
+                checklist: (task.checklist || []).map((entry) => ({ text: entry.text, done: entry.done })),
+                relations,
+              });
+              if (!ok) {
+                vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
+                return;
+              }
             }
             await DataManager.addTaskRelation(
               taskId,
@@ -473,6 +695,21 @@ export class LynvoPanel {
             const relationId = asString(message.relationId);
             if (!taskId || !relationId) {
               return;
+            }
+            const board = await DataManager.loadBoard();
+            const task = board?.tasks[taskId];
+            if (board && task) {
+              const relations = (task.relations || [])
+                .filter((relation) => relation.id !== relationId)
+                .map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId }));
+              const ok = await syncLinkedTaskToCode(board, taskId, {
+                checklist: (task.checklist || []).map((entry) => ({ text: entry.text, done: entry.done })),
+                relations,
+              });
+              if (!ok) {
+                vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
+                return;
+              }
             }
             await DataManager.deleteTaskRelation(taskId, relationId);
             LynvoPanel.refreshDataAndScheduleSync();
@@ -650,6 +887,47 @@ export class LynvoPanel {
                 : t("Removed {0} of {1} TODO comments. Some were already gone from the file.", removed, targets.length),
             );
             LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
+          case "relinkTodo": {
+            const taskId = asString(message.taskId);
+            if (!taskId) {
+              return;
+            }
+            const board = await DataManager.loadBoard();
+            const task = board?.tasks[taskId];
+            const todoId = task?.codeReference?.todoId;
+            const filePath = task?.codeReference?.filePath;
+            if (!todoId || !filePath || !isSafeWorkspaceRelativePath(filePath)) {
+              return;
+            }
+            const parsed = await readTodoComment(filePath, todoId);
+            if (!parsed) {
+              vscode.window.showErrorMessage(
+                t("Could not find the linked TODO comment in the code."),
+              );
+              return;
+            }
+            await DataManager.updateTaskText(taskId, parsed.title, parsed.description);
+            vscode.window.showInformationMessage(t("Task re-synced from code."));
+            LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
+          case "convertBrokenTask": {
+            const taskId = asString(message.taskId);
+            if (!taskId) {
+              return;
+            }
+            const confirm = t("Convert to normal task");
+            const action = await vscode.window.showWarningMessage(
+              t("The code linked to this task could not be found (file deleted/renamed, or the marker removed). Convert this promoted task to a normal task? The link will be removed."),
+              { modal: true },
+              confirm,
+            );
+            if (action === confirm) {
+              await DataManager.clearTaskCodeReference(taskId);
+              LynvoPanel.refreshDataAndScheduleSync();
+            }
             return;
           }
         }

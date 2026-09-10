@@ -812,6 +812,8 @@ export class DataManager {
     codeReference?: CodeReference,
     priority: LynvoTask["priority"] = "medium",
     dueDate?: number,
+    checklist: Array<{ text: string; done: boolean }> = [],
+    relations: Array<{ type: LynvoTaskRelationType; targetTaskId: string }> = [],
   ): Promise<void> {
     await this.mutateBoard(async (board) => {
       const user = await AuthProvider.getGitHubUser();
@@ -840,6 +842,19 @@ export class DataManager {
         labelIds,
         priority,
         dueDate,
+        checklist: checklist.map((entry) => ({
+          id: this.createId("check"),
+          text: entry.text,
+          done: entry.done,
+          createdAt: now,
+          updatedAt: now,
+        })),
+        relations: relations.map((entry) => ({
+          id: this.createId("rel"),
+          type: entry.type,
+          targetTaskId: entry.targetTaskId,
+          createdAt: now,
+        })),
       };
       this.addActivity( board, "task_created", `{${title}}`, user, { taskId } );
       if (codeReference) {
@@ -886,6 +901,36 @@ export class DataManager {
         isRename ? "task_renamed" : "task_updated",
         message,
         user, { taskId }
+      );
+    });
+  }
+
+  /**
+   * Re-sync a promoted task's title/description from its linked code comment.
+   * Used by the "relink" action (file -> board) so the JSON matches the code.
+   */
+  public static async updateTaskText(
+    taskId: string,
+    title: string,
+    description: string,
+  ): Promise<void> {
+    await this.mutateBoard(async (board) => {
+      const task = board.tasks[taskId];
+      if (!task) {return;}
+
+      const user = await AuthProvider.getGitHubUser();
+      const previousTitle = task.title;
+      task.title = title;
+      task.description = description;
+      task.updatedAt = Date.now();
+      if (user) {task.lastModifiedBy = user;}
+      const isRename = previousTitle !== title;
+      const message = isRename ? `{${previousTitle}} ==> {${title}}` : `{${title}}`;
+      this.addActivity(
+        board,
+        isRename ? "task_renamed" : "task_updated",
+        message,
+        user, { taskId },
       );
     });
   }
@@ -1052,7 +1097,7 @@ export class DataManager {
       this.addActivity(
         board,
         generateRelationActivityType(type, "added"),
-        `{${task.title}} <=> {${board.tasks[targetTaskId].title}}`,
+        `{${task.title}} <+> {${board.tasks[targetTaskId].title}}`,
         user,
         { taskId, targetTaskId, metadata: { type } },
       );
@@ -1081,7 +1126,7 @@ export class DataManager {
       this.addActivity(
         board,
         generateRelationActivityType(relation.type, "deleted"),
-        `{${task.title}} !=! {${targetTask?.title || relation.targetTaskId}}`,
+        `{${task.title}} <-> {${targetTask?.title || relation.targetTaskId}}`,
         user,
         { taskId, targetTaskId: relation.targetTaskId, metadata: { type: relation.type } },
       );

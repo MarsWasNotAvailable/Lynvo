@@ -13,5 +13,6 @@
   "command.setLanguage": "Lynvo: Cambiar idioma",
   "configuration.skills.description": "Instala automáticamente el archivo de habilidades (SKILL.md) del agente Lynvo para OpenCode, Claude Code, Cline, Cursor y otros agentes de IA al activar la extensión.",
   "configuration.language.description" : "Lenguaje para la interfaz de Lynvo. Usa 'auto' para usar el mismo idioma que VS Code, o un código que coincida con la localización disponible (por ejemplo, 'en', 'es'). El lenguaje de visualización también puede cambiarse en tiempo de ejecución con 'Lynvo: Switch Language'.",
+  "configuration.inCodeEditing.description": "Cuando está habilitado, editar el título, la descripción, la lista de tareas o las relaciones de una tarea vinculada al código también actualiza el comentario TODO en el archivo fuente vinculado. Desactiva para mantener el tablero y el código independientes.",
   "views.projectActions.name": "Acciones del proyecto"
 }
