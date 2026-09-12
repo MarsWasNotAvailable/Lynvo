@@ -498,19 +498,31 @@ export async function readFileTextLiveOrDisk(filePath: string): Promise<string |
 }
 
 /**
- * Write text to a file, applying to the open (unsaved) buffer when available so
- * we never clobber in-progress edits and never force a save; otherwise to disk.
+ * Write text to a file, or to disk:
+ * Applying to the open (unsaved) buffer when available,
+ * so we never clobber in-progress edits.
+ *
+ * When the file is open in the editor:
+ *  - If it was "clean" (already saved to disk) before our edit, we save it again afterwards,
+ *    so the user is not left with a lingering "unsaved" dot.
+ *  - If it was "dirty" (had unsaved changes), we leave it unsaved
+ *    (never force save on the user's pending work).
  */
 export async function writeFileTextLiveOrDisk(filePath: string, text: string): Promise<boolean> {
   const doc = findOpenDocument(filePath);
   if (doc) {
+    const wasCleanBeforeEdit = !doc.isDirty;
     const fullRange = new vscode.Range(
       new vscode.Position(0, 0),
       doc.lineAt(Math.max(0, doc.lineCount - 1)).range.end,
     );
     const edit = new vscode.WorkspaceEdit();
     edit.replace(doc.uri, fullRange, text);
-    return await vscode.workspace.applyEdit(edit);
+    const applied = await vscode.workspace.applyEdit(edit);
+    if (applied && wasCleanBeforeEdit) {
+      await doc.save();
+    }
+    return applied;
   }
   try {
     await writeWorkspaceFileText(filePath, text);
