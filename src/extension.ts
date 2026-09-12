@@ -145,6 +145,26 @@ async function promoteTodo(): Promise<void> {
      return;
    }
 
+   // Reject duplicate task titles (case-insensitive), both against existing
+   // board tasks and against the other titles being created in this batch.
+   const seenTitles = new Set<string>(
+     Object.values(board.tasks).map((task) => task.title.trim().toLowerCase()),
+   );
+   const duplicateTitles: string[] = [];
+   for (const item of prepared) {
+     const lowered = item.payload.title.trim().toLowerCase();
+     if (seenTitles.has(lowered)) {
+       duplicateTitles.push(item.payload.title);
+     }
+     seenTitles.add(lowered);
+   }
+   if (duplicateTitles.length > 0) {
+     vscode.window.showErrorMessage(
+       t('A task named "{0}" already exists. Task names must be unique.', duplicateTitles.join(", ")),
+     );
+     return;
+   }
+
    // Rebuild each comment (title + marker + body) and replace the old span.
    // Process bottom-up so earlier line indices stay valid.
    const edit = new vscode.WorkspaceEdit();
@@ -222,6 +242,14 @@ async function quickCreateTask(): Promise<void> {
        value.trim().length === 0 ? t("Title cannot be empty.") : null,
    });
    if (!title) {return;}
+
+   // Task titles are unique: reject a duplicate (case-insensitive).
+   if (DataManager.hasTaskWithTitle(board, title)) {
+     vscode.window.showErrorMessage(
+       t('A task named "{0}" already exists. Task names must be unique.', title.trim()),
+     );
+     return;
+   }
 
    const description =
      (await vscode.window.showInputBox({

@@ -804,6 +804,21 @@ export class DataManager {
     });
   }
 
+  /**
+   * Case-insensitive check whether a task with the given title already exists.
+   * Task titles are unique (the underlying system relies on a unique task id,
+   * and relations are matched by title), so duplicate titles are disallowed.
+   */
+  public static hasTaskWithTitle(board: LynvoBoard, title: string): boolean {
+    const needle = title.trim().toLowerCase();
+    if (!needle) {
+      return false;
+    }
+    return Object.values(board.tasks).some(
+      (task) => task.title.trim().toLowerCase() === needle,
+    );
+  }
+
   public static async createTask(
     title: string,
     description: string,

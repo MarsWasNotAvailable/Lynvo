@@ -236,6 +236,7 @@ type WebviewInboundMessage =
   | { command: "setCodeLinkStates"; states: Record<string, CodeLinkState> }
   | { command: "setRemotePending"; pending: boolean }
   | { command: "switchView"; view: LynvoView }
+  | { command: "createTaskResult"; success: boolean; error?: string }
   | { command: "setLanguage"; bundle: l10nJsonFormat };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -267,6 +268,13 @@ const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
   }
   if (value.command === "switchView" && isLynvoView(value.view)) {
     return { command: "switchView", view: value.view };
+  }
+  if (value.command === "createTaskResult") {
+    return {
+      command: "createTaskResult",
+      success: value.success === true,
+      error: typeof value.error === "string" && value.error.length > 0 ? value.error : undefined,
+    };
   }
   if (value.command === "setLanguage" && isRecord(value.bundle)) {
     return { command: "setLanguage", bundle: value.bundle as l10nJsonFormat };
@@ -1047,6 +1055,7 @@ export const App: React.FC = () => {
   const [newTaskLabels, setNewTaskLabels] = useState<string[]>([]);
   const [newTaskPriority, setNewTaskPriority] = useState<Priority>("medium");
   const [newTaskDueDate, setNewTaskDueDate] = useState("");
+  const [newTaskError, setNewTaskError] = useState("");
 
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -1112,6 +1121,20 @@ export const App: React.FC = () => {
 
       if (message.command === "setCodeLinkStates") {
         setCodeLinkStates(message.states);
+      }
+
+      if (message.command === "createTaskResult") {
+        if (message.success) {
+          setAddingTaskColId(null);
+          setNewTaskTitle("");
+          setNewTaskDesc("");
+          setNewTaskLabels([]);
+          setNewTaskPriority("medium");
+          setNewTaskDueDate("");
+          setNewTaskError("");
+        } else {
+          setNewTaskError(message.error || "");
+        }
       }
 
       if (message.command === "setRemotePending") {
@@ -1401,6 +1424,7 @@ export const App: React.FC = () => {
     setNewTaskLabels([]);
     setNewTaskPriority("medium");
     setNewTaskDueDate("");
+    setNewTaskError("");
   };
 
   const submitNewTask = () => {
@@ -1415,7 +1439,8 @@ export const App: React.FC = () => {
       priority: newTaskPriority,
       dueDate: fromDateInputValue(newTaskDueDate),
     });
-    setAddingTaskColId(null);
+    // Do NOT close the Task Creation here: wait for the createTaskResult message
+    // so that a duplicate title keeps the form (and the user's draft) open.
   };
 
   const startEditingTask = (task: LynvoTask) => {
@@ -3470,7 +3495,10 @@ export const App: React.FC = () => {
 
                 {addingTaskColId === col.id ? (
                   <div style={{ marginBottom: "15px", padding: "10px", backgroundColor: "var(--vscode-editor-background)", borderRadius: "6px", border: "1px solid var(--vscode-focusBorder)" }}>
-                    <input autoFocus placeholder={t("Task title...")} value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
+                    <input autoFocus placeholder={t("Task title...")} value={newTaskTitle} onChange={(e) => { setNewTaskTitle(e.target.value); if (newTaskError) { setNewTaskError(""); } }} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
+                    {newTaskError && (
+                      <div style={{ color: "var(--vscode-inputValidation-errorForeground, #f48771)", fontSize: "11px", marginBottom: "8px" }}>{newTaskError}</div>
+                    )}
                     <textarea placeholder={t("Write a description of the task here")} value={newTaskDesc} onChange={(e) => setNewTaskDesc(e.target.value)} rows={2} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
                     <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
                       <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value as Priority)} style={{ flex: 1, padding: "6px" }}>

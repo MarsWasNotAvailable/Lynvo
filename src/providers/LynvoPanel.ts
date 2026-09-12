@@ -403,6 +403,19 @@ export class LynvoPanel {
             if (!title) {
               return;
             }
+            // Task titles are unique: reject a duplicate (case-insensitive).
+            const board = await DataManager.loadBoard();
+            if (board && DataManager.hasTaskWithTitle(board, title)) {
+              // Refuse the creation but keep the Task Creation View open so the
+              // user's draft (title, description, ...) is not lost. Surface the
+              // reason inline in the webview instead of a one-off popup.
+              webview.postMessage({
+                command: "createTaskResult",
+                success: false,
+                error: t('A task named "{0}" already exists. Task names must be unique.', title.trim()),
+              });
+              return;
+            }
             await DataManager.createTask(
               title,
               asString(message.description) || "",
@@ -412,6 +425,7 @@ export class LynvoPanel {
               asPriority(message.priority),
               asNumber(message.dueDate),
             );
+            webview.postMessage({ command: "createTaskResult", success: true });
             LynvoPanel.refreshDataAndScheduleSync();
             return;
           }

@@ -1,4 +1,5 @@
 {
+  "A task named \"{0}\" already exists. Task names must be unique.": "A task named \"{0}\" already exists. Task names must be unique.",
   "Could not resolve relation target(s): {0}. Fix the task title and promote again.": "Could not resolve relation target(s): {0}. Fix the task title and promote again.",
   "Task created in Lynvo.": "Task created in Lynvo.",
   "No file is currently open.": "No file is currently open.",

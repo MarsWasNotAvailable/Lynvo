@@ -1,4 +1,5 @@
 {
+  "A task named \"{0}\" already exists. Task names must be unique.": "Esiste già un compito chiamato \"{0}\". I nomi dei compiti devono essere univoci.",
   "Could not resolve relation target(s): {0}. Fix the task title and promote again.": "Impossibile risolvere la/le destinazione(i) della relazione: {0}. Correggi il titolo del compito e riprova.",
   "Task created in Lynvo.": "Compito creato in Lynvo.",
   "No file is currently open.": "Nessun file è attualmente aperto.",
