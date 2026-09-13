@@ -39,22 +39,30 @@ export function lineHasMarker(line: string): boolean {
  */
 export function appendMarker(line: string, todoId: string): string {
   const trimmed = line.trimStart();
+  const leadingWs = (line.match(/^\s*/)?.[0]) || "";
 
-  // Test for Multiline comment opening tags, to deduce the closing tag
+  // Test for multiline comment opening tags, to deduce the closing tag.
   let closingTag: string | undefined;
-  if (trimmed.startsWith("<!--")) {
-    closingTag = "-->"; //XML
-  } else if (trimmed.startsWith("--[[")) {
-    closingTag = "]]";  //LUA
-  } else if (trimmed.startsWith("/*")) {
-    closingTag = "*/";  //C-like
-  }
+  let isTripleQuote = false;
+  if      (trimmed.startsWith("<!--"))  { closingTag = "-->"; }     // XML
+  else if (trimmed.startsWith("--[["))  { closingTag = "]]"; }      // Lua
+  else if (trimmed.startsWith("/*"))    { closingTag = "*/"; }      // C-like
+  else if (trimmed.startsWith("=begin")){ closingTag = "=end"; }    // Ruby
+  else if (trimmed.startsWith("=pod"))  { closingTag = "=cut"; }    // Perl
+  else if (trimmed.startsWith("{-"))    { closingTag = "-}"; }      // Haskell
+  else if (trimmed.startsWith('"""'))   { closingTag = '"""'; isTripleQuote = true; } // Python doubleys
+  else if (trimmed.startsWith("'''") )  { closingTag = "'''"; isTripleQuote = true; } // Python singleys
 
   if (closingTag) {
+    // For triple-quotes the opener and closer are the same token,
+    // so we only insert before the closer
+    // when the token also appears as a trailing token on this line.
+    const sameLineClose = isTripleQuote
+      ? trimmed.endsWith(closingTag) && trimmed.length > closingTag.length
+      : true;
     const index = line.lastIndexOf(closingTag);
-    if (index !== -1) {
+    if (sameLineClose && index !== -1) {
       const head = line.slice(0, index);
-      const leadingWs = (head.match(/^\s*/)?.[0]) || "";
       const content = head.slice(leadingWs.length).replace(/\s+$/, "");
       return content
         ? `${leadingWs}${content} ${todoId} ${closingTag}`
@@ -62,7 +70,7 @@ export function appendMarker(line: string, todoId: string): string {
     }
   }
 
-  //Plain line comments are left as a simple append.
+  // Multiline (closer on a later line) or plain line comments: simple append.
   return `${line.replace(/\s+$/, "")} ${todoId}`;
 }
 
@@ -77,7 +85,7 @@ export function removeMarker(line: string, todoId: string): string {
 /** Strip leading whitespace and a single comment opener, plus following spaces. */
 function stripCommentStart(line: string): string {
   let t = line.replace(/^\s+/, "");
-  t = t.replace(/^(\/\*\*|\/\*|\/\/|<!--|--|#|;|\*)/, "");
+  t = t.replace(/^(\/\*\*|\/\*|\/\/|<!--|--|=begin|=pod|\{-|"""|'''|#|;|\*)/, "");
   return t.replace(/^\s+/, "");
 }
 
@@ -104,8 +112,8 @@ export function isTodoCommentLine(line: string): boolean {
 /** Derive a human-readable task title from a TODO source line. */
 export function deriveTitle(line: string): string {
   let title = line.trim();
-  // Strip leading comment markers (//, /*, <!--, --, #, ;, *).
-  title = title.replace(/^(\s*(?:\/\/|\/\*|<!--|--|#|;|\*)\s*)+/, "");
+  // Strip leading comment markers : //, /*, <!--, --, =begin, =pod, {-, """, ''', #, ;, *
+  title = title.replace(/^(\s*(?:\/\/|\/\*|<!--|--|=begin|=pod|\{-|"""|'''|#|;|\*)\s*)+/, "");
   // Strip the keyword and any following separator (":", "-", ".", space).
   for (const keyword of TODO_KEYWORDS) {
     if (title.startsWith(keyword)) {
@@ -114,7 +122,10 @@ export function deriveTitle(line: string): string {
     }
   }
   // Strip any trailing Lynvo marker and comment-close markers.
-  title = title.replace(MARKER_REGEX, "").replace(/(-->|\*\/)\s*$/, "").trim();
+  title = title
+    .replace(MARKER_REGEX, "")
+    .replace(/\s*(?:-->|\*\/|\]\]|-}|"""|'''|=end|=cut)\s*$/, "")
+    .trim();
   return title || line.trim();
 }
 
@@ -226,13 +237,29 @@ export async function removeTodoCommentFromFile(filePath: string, todoId: string
 function findCommentEndIndex(lines: string[], startIndex: number): number {
   const first = (lines[startIndex] || "").trimStart();
   let closer: string | undefined;
-  if (first.startsWith("/*")) { closer = "*/"; }
-  else if (first.startsWith("<!--")) { closer = "-->"; }
-  else if (first.startsWith("--[[")) { closer = "]]"; }
+  let tripleQuote = false;
+  if      (first.startsWith("/*"))     { closer = "*/"; }
+  else if (first.startsWith("<!--"))   { closer = "-->"; }
+  else if (first.startsWith("--[["))   { closer = "]]"; }
+  else if (first.startsWith("=begin")) { closer = "=end"; }
+  else if (first.startsWith("=pod"))   { closer = "=cut"; }
+  else if (first.startsWith("{-"))     { closer = "-}"; }
+  else if (first.startsWith('"""'))    { closer = '"""'; tripleQuote = true; }
+  else if (first.startsWith("'''"))    { closer = "'''"; tripleQuote = true; }
   if (!closer) {return startIndex;}
   // The closer may be on the same line (single-line block comment).
   for (let j = startIndex; j < lines.length; j++) {
-    if (lines[j].includes(closer)) {return j;}
+    const line = lines[j];
+    if (tripleQuote) {
+      // The opener already contains the token; only count a distinct trailing close.
+      if (j === startIndex) {
+        if (line.trim().endsWith(closer) && line.trim().length > closer.length) {return j;}
+        continue;
+      }
+      if (line.trim().endsWith(closer)) {return j;}
+    } else if (line.includes(closer)) {
+      return j;
+    }
   }
   return lines.length - 1;
 }
@@ -424,15 +451,20 @@ function describeComment(firstLine: string): {
   const trimmed = firstLine.trimStart();
   let opener = "";
   let closer: string | null = null;
-  if      (trimmed.startsWith("/*"))   {opener = "/*"; closer = "*/";}
-  else if (trimmed.startsWith("<!--")) {opener = "<!--"; closer = "-->";}
-  else if (trimmed.startsWith("--[[")) {opener = "--[["; closer = "]]";}
-  else if (trimmed.startsWith("//"))   {opener = "//";}
-  else if (trimmed.startsWith("#"))    {opener = "#";}
-  else if (trimmed.startsWith(";"))    {opener = ";";}
+  if      (trimmed.startsWith("/*"))     {opener = "/*";     closer = "*/";}
+  else if (trimmed.startsWith("<!--"))   {opener = "<!--";   closer = "-->";}
+  else if (trimmed.startsWith("--[["))   {opener = "--[[";   closer = "]]";}
+  else if (trimmed.startsWith("=begin")) {opener = "=begin"; closer = "=end";}
+  else if (trimmed.startsWith("=pod"))   {opener = "=pod";   closer = "=cut";}
+  else if (trimmed.startsWith("{-"))     {opener = "{-";     closer = "-}";}
+  else if (trimmed.startsWith('"""'))    {opener = '"""';    closer = '"""';}
+  else if (trimmed.startsWith("'''"))    {opener = "'''";    closer = "'''";}
+  else if (trimmed.startsWith("//"))     {opener = "//";}
+  else if (trimmed.startsWith("#"))      {opener = "#";}
+  else if (trimmed.startsWith(";"))      {opener = ";";}
 
   // Reconstruct the prefix (keyword + separator) exactly as it was formatted,
-  // so we keep the user's original TODO/IDEA/FIXME and its punctuation.
+  // so that we keep the user's original TODO/IDEA/FIXME and its punctuation.
   const afterOpener = trimmed.slice(opener.length);
   let prefix = " ";
   for (const kw of TODO_KEYWORDS) {
