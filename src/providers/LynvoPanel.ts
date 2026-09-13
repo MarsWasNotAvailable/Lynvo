@@ -10,17 +10,29 @@ import {
   removeMarkerFromFile,
   removeTodoCommentFromFile,
   replaceTodoComment,
+  resolveRelationTarget,
 } from "./TodoTracker";
 import type { TodoBodyChecklistItem, TodoCommentPayload } from "./TodoTracker";
 
 /** State of a promoted task's link to its in-code TODO comment. */
 type CodeLinkState = "synced" | "diverged" | "broken";
 
+/** Order-insensitive signature of a checklist (done flag + text). */
+const checklistSignature = (items: Array<{ text: string; done: boolean }>): string =>
+  items
+    .map((item) => `${item.done ? "x" : " "}::${item.text.trim()}`)
+    .sort()
+    .join("|");
+
+/** Order-insensitive signature of relations, keyed by type + target task id. */
+const relationSignature = (items: Array<{ type: string; targetId: string }>): string =>
+  items.map((item) => `${item.type}::${item.targetId.trim()}`).sort().join("|");
+
 /**
  * For every linked task, read the linked file (live buffer or disk)
  * and classify the link:
- * `synced` (file matches the board),
- * `diverged` (marker present but text differs),
+ * `synced` (file contents matches the board),
+ * `diverged` (marker present but file contents differ),
  * `broken` (file or marker no longer found).
  */
 async function computeCodeLinkStates(
@@ -44,8 +56,28 @@ async function computeCodeLinkStates(
         states[task.id] = "broken";
         return;
       }
+      const titleMatches = parsed.title === task.title;
+      const descriptionMatches = parsed.description === task.description;
+      const checklistMatches =
+        checklistSignature(parsed.checklist) ===
+        checklistSignature(
+          (task.checklist || []).map((entry) => ({ text: entry.text, done: entry.done })),
+        );
+      const relationsMatch =
+        relationSignature(
+          parsed.relations.map((relation) => ({
+            type: relation.type,
+            targetId: resolveRelationTarget(board, relation.target)?.taskId || relation.target,
+          })),
+        ) ===
+        relationSignature(
+          (task.relations || []).map((relation) => ({
+            type: relation.type,
+            targetId: relation.targetTaskId,
+          })),
+        );
       states[task.id] =
-        parsed.title === task.title && parsed.description === task.description
+        titleMatches && descriptionMatches && checklistMatches && relationsMatch
           ? "synced"
           : "diverged";
     }),
@@ -141,6 +173,118 @@ const isSafeWorkspaceRelativePath = (filePath: string): boolean =>
 
 /** Board-side relation (type + target task id). */
 type BoardRelation = { type: LynvoTaskRelationType; targetTaskId: string };
+
+/** A checklist item coming from the webview (id present only for existing items). */
+type IncomingChecklistItem = { id?: string; text: string; done: boolean };
+
+const asChecklistItems = (
+  value: unknown,
+): IncomingChecklistItem[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) {
+      return [];
+    }
+    const text = asString(entry.text);
+    if (!text) {
+      return [];
+    }
+    return [
+      {
+        id: asString(entry.id) || undefined,
+        text,
+        done: asBoolean(entry.done) === true,
+      },
+    ];
+  });
+};
+
+const asRelationTargets = (value: unknown): BoardRelation[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) {
+      return [];
+    }
+    const type = asRelationType(entry.type);
+    const targetTaskId = asString(entry.targetTaskId);
+    if (!type || !targetTaskId) {
+      return [];
+    }
+    return [{ type, targetTaskId }];
+  });
+};
+
+/**
+ * Reconcile an incoming full checklist against the board's current one.
+ * The `updated` items carry only the field(s) that actually changed,
+ * so that the resulting activity is classified correctly (rename vs complete/reopen).
+ */
+const diffChecklist = (
+  existing: Array<{ id: string; text: string; done: boolean }>,
+  incoming: IncomingChecklistItem[],
+): {
+  added: Array<{ text: string; done: boolean }>;
+  updated: Array<{ id: string; text?: string; done?: boolean }>;
+  removed: string[];
+} => {
+  const incomingIds = new Set(
+    incoming.map((item) => item.id).filter((id): id is string => Boolean(id)),
+  );
+  const removed = existing
+    .filter((entry) => !incomingIds.has(entry.id))
+    .map((entry) => entry.id);
+
+  const updated: Array<{ id: string; text?: string; done?: boolean }> = [];
+  for (const item of incoming) {
+    if (!item.id) {
+      continue;
+    }
+    const entry = existing.find((candidate) => candidate.id === item.id);
+    if (!entry) {
+      continue;
+    }
+    const change: { id: string; text?: string; done?: boolean } = { id: item.id };
+    if (entry.text !== item.text) {
+      change.text = item.text;
+    }
+    if (entry.done !== item.done) {
+      change.done = item.done;
+    }
+    if (change.text !== undefined || change.done !== undefined) {
+      updated.push(change);
+    }
+  }
+
+  const added = incoming
+    .filter((item) => !item.id)
+    .map((item) => ({ text: item.text, done: item.done }));
+
+  return { added, updated, removed };
+};
+
+/** Reconcile an incoming full relation list against the board's current one. */
+const diffRelations = (
+  existing: Array<{ id: string; type: LynvoTaskRelationType; targetTaskId: string }>,
+  incoming: BoardRelation[],
+): { added: BoardRelation[]; removed: string[] } => {
+  const key = (type: LynvoTaskRelationType, targetTaskId: string) =>
+    `${type}::${targetTaskId}`;
+  const incomingKeys = new Set(incoming.map((r) => key(r.type, r.targetTaskId)));
+  const existingKeys = new Set(
+    existing.map((r) => key(r.type, r.targetTaskId)),
+  );
+  const removed = existing
+    .filter((r) => !incomingKeys.has(key(r.type, r.targetTaskId)))
+    .map((r) => r.id);
+  const added = incoming.filter(
+    (r) => !existingKeys.has(key(r.type, r.targetTaskId)),
+  );
+  return { added, removed };
+};
 
 const CODE_SYNC_ERROR =
   "Could not write to the linked code file. The board was not updated — fix the file and try again.";
@@ -436,38 +580,107 @@ export class LynvoPanel {
             if (!taskId || !title) {
               return;
             }
-
-            // For a promoted task, the title/description are bound
-            // to the in-code TODO comment.
-            // Write the code FIRST (live buffer, no forced save);
-            // if that fails,
-            // do not touch the board so the user can fix the file and retry.
             const board = await DataManager.loadBoard();
             const task = board?.tasks[taskId];
-            const todoId = task?.codeReference?.todoId;
-            const filePath = task?.codeReference?.filePath;
+            if (!task) {
+              return;
+            }
+
+            const labelIds = asStringArray(message.labelIds) || [];
+            const priority = asPriority(message.priority) || "medium";
+            const dueDate = asNumber(message.dueDate);
+            // The edit form sends the FULL desired checklist and relations
+            // (existing items keep their id, new items have none)
+            // so a single Save action will commits every change atomically.
+            // If a field is absent, that section is treated as unchanged.
+            const effectiveChecklist: IncomingChecklistItem[] = Array.isArray(message.checklist)
+              ? asChecklistItems(message.checklist)
+              : (task.checklist || []).map((entry) => ({ id: entry.id, text: entry.text, done: entry.done }));
+            const effectiveRelations: BoardRelation[] = Array.isArray(message.relations)
+              ? asRelationTargets(message.relations)
+              : (task.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId }));
+
+            const fieldsChanged =
+              task.title !== title ||
+              task.description !== description ||
+              JSON.stringify(task.labelIds || []) !== JSON.stringify(labelIds) ||
+              (task.priority || "medium") !== priority ||
+              (task.dueDate ?? null) !== (dueDate ?? null);
+
+            const checklistDiff = diffChecklist(task.checklist || [], effectiveChecklist);
+            const relationsDiff = diffRelations(task.relations || [], effectiveRelations);
+            const checklistChanged =
+              checklistDiff.added.length > 0 ||
+              checklistDiff.updated.length > 0 ||
+              checklistDiff.removed.length > 0;
+            const relationsChanged =
+              relationsDiff.added.length > 0 || relationsDiff.removed.length > 0;
+
+            if (!fieldsChanged && !checklistChanged && !relationsChanged) {
+              return;
+            }
+
+            const todoId = task.codeReference?.todoId;
+            const filePath = task.codeReference?.filePath;
             const isLinked = Boolean(
               todoId && filePath && isSafeWorkspaceRelativePath(filePath),
             );
-            const textChanged =
-              isLinked &&
-              ((task!.title !== title) || (task!.description !== description));
-            if (textChanged) {
-              const ok = await syncLinkedTaskToCode(board!, taskId, { title, description });
+
+            // For a promoted task, selected fields are bound to the in-code TODO comment :
+            // Title, Description, Checklist, Relations.
+            // We try to write the code ONCE with the full final content,
+            // BEFORE committing anything to the board;
+            // if it fails, we keep no partial state, we abort so the user can fix the file and retry.
+            if (isLinked) {
+              const ok = await syncLinkedTaskToCode(board, taskId, {
+                title,
+                description,
+                checklist: effectiveChecklist.map((entry) => ({ text: entry.text, done: entry.done })),
+                relations: effectiveRelations,
+              });
               if (!ok) {
                 vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
                 return;
               }
             }
 
-            await DataManager.editTask(
-              taskId,
-              title,
-              description,
-              asStringArray(message.labelIds),
-              asPriority(message.priority),
-              asNumber(message.dueDate),
-            );
+            // Commit the board changes (remove, then update, then add).
+            if (fieldsChanged) {
+              await DataManager.editTask(
+                taskId,
+                title,
+                description,
+                labelIds,
+                priority,
+                dueDate,
+              );
+            }
+            for (const id of checklistDiff.removed) {
+              await DataManager.deleteChecklistItem(taskId, id);
+            }
+            for (const update of checklistDiff.updated) {
+              if (update.text !== undefined && update.done !== undefined) {
+                // Both changed: emit a rename then the completion/reopen,
+                // so that the Activity log stays accurate.
+                await DataManager.updateChecklistItem(taskId, update.id, { text: update.text });
+                await DataManager.updateChecklistItem(taskId, update.id, { done: update.done });
+              } else {
+                await DataManager.updateChecklistItem(taskId, update.id, {
+                  text: update.text,
+                  done: update.done,
+                });
+              }
+            }
+            for (const item of checklistDiff.added) {
+              await DataManager.addChecklistItem(taskId, item.text, item.done);
+            }
+            for (const id of relationsDiff.removed) {
+              await DataManager.deleteTaskRelation(taskId, id);
+            }
+            for (const relation of relationsDiff.added) {
+              await DataManager.addTaskRelation(taskId, relation.targetTaskId, relation.type);
+            }
+
             LynvoPanel.refreshDataAndScheduleSync();
             return;
           }
@@ -922,7 +1135,35 @@ export class LynvoPanel {
               );
               return;
             }
+            // Title and Description from the code comment.
             await DataManager.updateTaskText(taskId, parsed.title, parsed.description);
+            // Checklist: make the board match what the code currently holds.
+            // NOTE: the code is the source of truth for a re-sync.
+            const checklistDiff = diffChecklist(task.checklist || [], parsed.checklist);
+            for (const id of checklistDiff.removed) {
+              await DataManager.deleteChecklistItem(taskId, id);
+            }
+            for (const item of checklistDiff.added) {
+              await DataManager.addChecklistItem(taskId, item.text, item.done);
+            }
+            // Relations: resolve each code target to a task and reconcile
+            // A task is deduced from task-id, a Lynvo marker, or a {Title} ;
+            // The unresolvable targets are skipped (no task).
+            const codeRelations: BoardRelation[] = parsed.relations
+              .map((relation) => {
+                const resolved = resolveRelationTarget(board!, relation.target);
+                return resolved
+                  ? { type: relation.type, targetTaskId: resolved.taskId }
+                  : undefined;
+              })
+              .filter((relation): relation is BoardRelation => relation !== undefined);
+            const relationsDiff = diffRelations(task.relations || [], codeRelations);
+            for (const id of relationsDiff.removed) {
+              await DataManager.deleteTaskRelation(taskId, id);
+            }
+            for (const relation of relationsDiff.added) {
+              await DataManager.addTaskRelation(taskId, relation.targetTaskId, relation.type);
+            }
             vscode.window.showInformationMessage(t("Task re-synced from code."));
             LynvoPanel.refreshDataAndScheduleSync();
             return;

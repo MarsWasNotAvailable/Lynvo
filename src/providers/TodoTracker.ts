@@ -532,11 +532,11 @@ export async function writeFileTextLiveOrDisk(filePath: string, text: string): P
   }
 }
 
-/** Read a promoted TODO comment's title/description (live buffer or disk). */
+/** Read a promoted TODO comment's content, from the live buffer or disk. */
 export async function readTodoComment(
   filePath: string,
   todoId: string,
-): Promise<{ title: string; description: string } | undefined> {
+): Promise<TodoCommentPayload | undefined> {
   const text = await readFileTextLiveOrDisk(filePath);
   if (!text) {return undefined;}
   return parseTodoComment(text, todoId);
@@ -566,9 +566,12 @@ export function isInCodeEditingEnabled(): boolean {
 }
 
 /**
- * Resolve a relation target expression (from code) to a task:
- * a task id, a Lynvo TODO marker (of another promoted task),
- * or a `{Title}` matched case-insensitively.
+ * Resolve a relation target expression (from code) to a task.
+ * Accepted forms, in order:
+ *  - a bare task id;
+ *  - a Lynvo TODO marker (of another promoted task);
+ *  - Lynvo's written form `task-id {Title}` (leading id token);
+ *  - a `{Title}` or bare title, matched case-insensitively.
  */
 export function resolveRelationTarget(
   board: LynvoBoard,
@@ -576,9 +579,11 @@ export function resolveRelationTarget(
 ): { taskId: string; title: string } | undefined {
   const t = target.trim();
   const tasks = board.tasks;
+  // 1) A bare task id.
   if (tasks[t]) {
     return { taskId: t, title: tasks[t].title };
   }
+  // 2) A Lynvo TODO marker (of another promoted task).
   const marker = t.match(MARKER_REGEX);
   if (marker) {
     const owner = Object.values(tasks).find((task) => task.codeReference?.todoId === marker[0]);
@@ -586,7 +591,13 @@ export function resolveRelationTarget(
       return { taskId: owner.id, title: owner.title };
     }
   }
-  const titleMatch = t.match(/^\{(.+)\}$/);
+  // 3) Lynvo writes relations as `task-id {Title}`; try the leading id token.
+  const firstToken = t.split(/\s+/)[0];
+  if (firstToken !== t && tasks[firstToken]) {
+    return { taskId: firstToken, title: tasks[firstToken].title };
+  }
+  // 4) A braced `{Title}` (or a bare title), matched case-insensitively.
+  const titleMatch = t.match(/\{(.+)\}/);
   const titleText = (titleMatch ? titleMatch[1] : t).trim().toLowerCase();
   if (titleText) {
     const byTitle = Object.values(tasks).find(

@@ -981,6 +981,7 @@ export class DataManager {
   public static async addChecklistItem(
     taskId: string,
     text: string,
+    done = false,
   ): Promise<void> {
     await this.mutateBoard(async (board) => {
       const task = board.tasks[taskId];
@@ -991,7 +992,7 @@ export class DataManager {
       const item: LynvoChecklistItem = {
         id: this.createId("check"),
         text: text.trim(),
-        done: false,
+        done,
         createdAt: now,
         updatedAt: now,
       };

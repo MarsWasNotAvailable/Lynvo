@@ -41,6 +41,9 @@ type WebviewOutboundMessage =
       labelIds: string[];
       priority: Priority;
       dueDate?: number;
+      // Full desired checklist and relations (existing keep their id, new have none).
+      checklist?: Array<{ id?: string; text: string; done: boolean }>;
+      relations?: Array<{ type: LynvoTaskRelationType; targetTaskId: string }>;
     }
   | { command: "deleteTask"; taskId: string }
   | { command: "addChecklistItem"; taskId: string; text: string }
@@ -1081,16 +1084,20 @@ export const App: React.FC = () => {
   const [labelsSortKey, setLabelsSortKey] = useState<"name" | "usage">("name");
   const [labelError, setLabelError] = useState<string | null>(null);
   const [checklistDrafts, setChecklistDrafts] = useState<Record<string, string>>({});
-  const [pendingChecklistByTask, setPendingChecklistByTask] = useState<
-    Record<string, Array<{ key: string; text: string }>>
+  // The edit form's FULL desired checklist:
+  // existing items keep their id, new items have none.
+  // Committed atomically on Save, discarded on Cancel.
+  const [draftChecklistByTask, setDraftChecklistByTask] = useState<
+    Record<string, Array<{ key: string; id?: string; text: string; done: boolean }>>
   >({});
   const [relationTargetByTask, setRelationTargetByTask] = useState<Record<string, string>>({});
   const [relationTypeByTask, setRelationTypeByTask] = useState<
     Record<string, LynvoTaskRelationType>
   >({});
-  // Relations selected in a task's edit form; committed together with its Save.
-  const [pendingRelationsByTask, setPendingRelationsByTask] = useState<
-    Record<string, Array<{ key: string; targetTaskId: string; relationType: LynvoTaskRelationType }>>
+  // The edit form's FULL desired relations:
+  // existing keep their id, new have none.
+  const [draftRelationsByTask, setDraftRelationsByTask] = useState<
+    Record<string, Array<{ key: string; id?: string; targetTaskId: string; relationType: LynvoTaskRelationType }>>
   >({});
 
   const draggedTaskRef = useRef<string | null>(null);
@@ -1457,19 +1464,33 @@ export const App: React.FC = () => {
     setEditLabelIds(task.labelIds || []);
     setEditPriority(getTaskPriority(task));
     setEditDueDate(toDateInputValue(task.dueDate));
+    // Seed the edit form's drafts with the task's current Checklist and Relations.
+    // The existing items keep their id so the panel can diff them on Save.
+    setDraftChecklistByTask((prev) => ({
+      ...prev,
+      [task.id]: (task.checklist || []).map((item) => ({ key: `c-${item.id}`, id: item.id, text: item.text, done: item.done })),
+    }));
+    setDraftRelationsByTask((prev) => ({
+      ...prev,
+      [task.id]: (task.relations || []).map((relation) => ({ key: `r-${relation.id}`, id: relation.id, targetTaskId: relation.targetTaskId, relationType: relation.type })),
+    }));
+    setChecklistDrafts((prev) => ({ ...prev, [task.id]: "" }));
+    setRelationTargetByTask((prev) => ({ ...prev, [task.id]: "" }));
   };
 
   const saveEditTask = () => {
     if (!editingTaskId) {return;}
-    const taskId = editingTaskId;
-    const task = boardData?.tasks[taskId];
+
     const title = editTitle.trim();
     if (!title) {return;}
 
-    // Only persist the field edit when something actually changed;
-    // so that when we commit a staged relation with the "Save" action,
-    // we do not also emit a spurious task_updated activity.
+    const taskId = editingTaskId;
+    const task = boardData?.tasks[taskId];
+    
     const nextDueDate = fromDateInputValue(editDueDate);
+    const draftChecklist = draftChecklistByTask[taskId] || [];
+    const draftRelations = draftRelationsByTask[taskId] || [];
+
     const fieldsChanged =
       !task ||
       task.title !== title ||
@@ -1478,38 +1499,45 @@ export const App: React.FC = () => {
       JSON.stringify(task.labelIds || []) !== JSON.stringify(editLabelIds) ||
       (task.dueDate ?? null) !== (nextDueDate ?? null);
 
-    if (fieldsChanged) {
-      vscode.postMessage({
-        command: "editTask",
-        taskId,
-        title,
-        description: editDesc,
-        labelIds: editLabelIds,
-        priority: editPriority,
-        dueDate: nextDueDate,
-      });
+    // Checklist order is user-visible, so compare in order.
+    const checklistChanged =
+      JSON.stringify(draftChecklist.map((item) => [item.text.trim(), item.done])) !==
+      JSON.stringify((task?.checklist || []).map((item) => [item.text, item.done]));
+
+    const relationKey = (type: LynvoTaskRelationType, target: string) => `${type}|${target}`;
+    const relationsChanged =
+      draftRelations.map((relation) => relationKey(relation.relationType, relation.targetTaskId)).sort().join("\n") !==
+      (task?.relations || []).map((relation) => relationKey(relation.type, relation.targetTaskId)).sort().join("\n");
+
+    if (!fieldsChanged && !checklistChanged && !relationsChanged) {
+      setEditingTaskId(null);
+      return;
     }
 
-    // Commit any relations staged in this form together with the task edit,
-    // so a single Save covers both (no separate "Link" confirmation step needed).
-    for (const draft of pendingRelationsByTask[taskId] || []) {
-      createTaskRelation(taskId, draft.targetTaskId, draft.relationType);
-    }
-    clearPendingRelations(taskId);
+    // One atomic message: the panel writes the linked code comment once
+    // with the full final content, and commits the board changes;
+    // Cancel never sent anything.
+    vscode.postMessage({
+      command: "editTask",
+      taskId,
+      title,
+      description: editDesc,
+      labelIds: editLabelIds,
+      priority: editPriority,
+      dueDate: nextDueDate,
+      checklist: draftChecklist.map(({ id, text, done }) => ({ id, text: text.trim(), done })),
+      relations: draftRelations.map(({ targetTaskId, relationType }) => ({ targetTaskId, type: relationType })),
+    });
 
-    // Commit any checklist items staged in this form together with the task edit.
-    for (const draft of pendingChecklistByTask[taskId] || []) {
-      vscode.postMessage({ command: "addChecklistItem", taskId, text: draft.text });
-    }
-    clearPendingChecklist(taskId);
-
+    setDraftChecklistByTask((prev) => ({ ...prev, [taskId]: [] }));
+    setDraftRelationsByTask((prev) => ({ ...prev, [taskId]: [] }));
     setEditingTaskId(null);
   };
 
   const cancelEditTask = () => {
     if (editingTaskId) {
-      clearPendingRelations(editingTaskId);
-      clearPendingChecklist(editingTaskId);
+      setDraftChecklistByTask((prev) => ({ ...prev, [editingTaskId]: [] }));
+      setDraftRelationsByTask((prev) => ({ ...prev, [editingTaskId]: [] }));
     }
     setEditingTaskId(null);
   };
@@ -1520,67 +1548,64 @@ export const App: React.FC = () => {
     return { done, total: checklist.length };
   };
 
-  // Stage a new checklist item in the task's edit form.
-  // Like relations, it is only committed when the task is Saved (see saveEditTask),
-  // so a single Save covers all staged changes and Cancel discards them.
-  const addPendingChecklistItem = (taskId: string) => {
+  // --- Edit-form checklist drafts (committed atomically on Save) ---
+
+  const updateDraftChecklistItem = (
+    taskId: string,
+    key: string,
+    patch: { text?: string; done?: boolean },
+  ) => {
+    const items = (draftChecklistByTask[taskId] || []).map((item) =>
+      item.key === key ? { ...item, ...patch } : item,
+    );
+    setDraftChecklistByTask((prev) => ({ ...prev, [taskId]: items }));
+  };
+
+  const removeDraftChecklistItem = (taskId: string, key: string) => {
+    const items = (draftChecklistByTask[taskId] || []).filter((item) => item.key !== key);
+    setDraftChecklistByTask((prev) => ({ ...prev, [taskId]: items }));
+  };
+
+  const addDraftChecklistItem = (taskId: string) => {
     const text = checklistDrafts[taskId]?.trim();
     if (!text) {return;}
-
-    const key = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const pending = pendingChecklistByTask[taskId] || [];
-    setPendingChecklistByTask({ ...pendingChecklistByTask, [taskId]: [...pending, { key, text }] });
-    setChecklistDrafts({ ...checklistDrafts, [taskId]: "" });
+    const item = {
+      key: `c-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      text,
+      done: false,
+    };
+    setDraftChecklistByTask((prev) => ({ ...prev, [taskId]: [...(prev[taskId] || []), item] }));
+    setChecklistDrafts((prev) => ({ ...prev, [taskId]: "" }));
   };
 
-  const removePendingChecklistItem = (taskId: string, key: string) => {
-    const pending = (pendingChecklistByTask[taskId] || []).filter((draft) => draft.key !== key);
-    setPendingChecklistByTask({ ...pendingChecklistByTask, [taskId]: pending });
-  };
+  // --- Edit-form relation drafts (committed atomically on Save) ---
 
-  const clearPendingChecklist = (taskId: string) => {
-    setPendingChecklistByTask({ ...pendingChecklistByTask, [taskId]: [] });
-  };
-
-  // Stage a relation in the task's edit form.
-  // It is only committed when the task is Saved (see saveEditTask),
-  // so adding a relation no longer needs its own separate confirmation step.
-  const addPendingRelation = (taskId: string) => {
+  const addDraftRelation = (taskId: string) => {
     const targetTaskId = relationTargetByTask[taskId];
     const relationType = relationTypeByTask[taskId] || "related";
     if (!targetTaskId || targetTaskId === taskId) {return;}
 
-    const task = boardData?.tasks[taskId];
-    const pending = pendingRelationsByTask[taskId] || [];
-    const isDuplicate =
-      (task?.relations || []).some(
-        (relation) =>
-          relation.targetTaskId === targetTaskId && relation.type === relationType,
-      ) ||
-      pending.some(
-        (draft) => draft.targetTaskId === targetTaskId && draft.relationType === relationType,
-      );
+    const drafts = draftRelationsByTask[taskId] || [];
+    const isDuplicate = drafts.some(
+      (draft) => draft.targetTaskId === targetTaskId && draft.relationType === relationType,
+    );
     if (isDuplicate) {
-      setRelationTargetByTask({ ...relationTargetByTask, [taskId]: "" });
+      setRelationTargetByTask((prev) => ({ ...prev, [taskId]: "" }));
       return;
     }
 
     const draft = {
-      key: `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      key: `r-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       targetTaskId,
       relationType,
     };
-    setPendingRelationsByTask({ ...pendingRelationsByTask, [taskId]: [...pending, draft] });
-    setRelationTargetByTask({ ...relationTargetByTask, [taskId]: "" });
+    setDraftRelationsByTask((prev) => ({ ...prev, [taskId]: [...drafts, draft] }));
+    setRelationTargetByTask((prev) => ({ ...prev, [taskId]: "" }));
   };
 
-  const removePendingRelation = (taskId: string, key: string) => {
-    const pending = (pendingRelationsByTask[taskId] || []).filter((draft) => draft.key !== key);
-    setPendingRelationsByTask({ ...pendingRelationsByTask, [taskId]: pending });
-  };
-
-  const clearPendingRelations = (taskId: string) => {
-    setPendingRelationsByTask({ ...pendingRelationsByTask, [taskId]: [] });
+  const removeDraftRelation = (taskId: string, key: string) => {
+    const items = (draftRelationsByTask[taskId] || []).filter((item) => item.key !== key);
+    setDraftRelationsByTask((prev) => ({ ...prev, [taskId]: items }));
   };
 
   const deleteTaskRelation = (taskId: string, relationId: string) => {
@@ -1816,9 +1841,9 @@ export const App: React.FC = () => {
     const checklistProgress = getChecklistProgress(task);
     // List as targetable tasks only the ones that are not already linked to this one
     // in either direction (this -> candidate or candidate -> this),
-    // and that are not already staged as a pending relation in this form.
+    // and that are not already staged as a draft relation in this form.
     const linkedTargets = new Set((task.relations || []).map((relation) => relation.targetTaskId));
-    const pendingTargetIds = new Set((pendingRelationsByTask[task.id] || []).map((draft) => draft.targetTaskId));
+    const pendingTargetIds = new Set((draftRelationsByTask[task.id] || []).map((draft) => draft.targetTaskId));
     const linkedToThis = new Set(
       tasks
         .filter((candidate) => (candidate.relations || []).some((relation) => relation.targetTaskId === task.id))
@@ -1884,57 +1909,25 @@ export const App: React.FC = () => {
             {renderLabelSelector(editLabelIds, setEditLabelIds)}
             <div style={{ borderTop: "1px solid var(--vscode-widget-border)", paddingTop: "8px", marginTop: "8px" }}>
               <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "6px" }}>{t("Checklist")}</div>
-              {(task.checklist || []).map((item) => (
-                <div key={item.id} style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "5px" }}>
+              {(draftChecklistByTask[task.id] || []).map((item) => (
+                <div key={item.key} style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "5px" }}>
                   <input
                     type="checkbox"
                     checked={item.done}
                     onChange={(e) =>
-                      vscode.postMessage({
-                        command: "updateChecklistItem",
-                        taskId: task.id,
-                        itemId: item.id,
-                        done: e.target.checked,
-                      })
+                      updateDraftChecklistItem(task.id, item.key, { done: e.target.checked })
                     }
                   />
                   <input
                     defaultValue={item.text}
                     onBlur={(e) =>
-                      vscode.postMessage({
-                        command: "updateChecklistItem",
-                        taskId: task.id,
-                        itemId: item.id,
-                        text: e.target.value,
-                      })
+                      updateDraftChecklistItem(task.id, item.key, { text: e.target.value })
                     }
                     style={{ flex: 1, padding: "4px" }}
                   />
                   <button
                     className="icon-btn delete"
-                    onClick={() =>
-                      vscode.postMessage({
-                        command: "deleteChecklistItem",
-                        taskId: task.id,
-                        itemId: item.id,
-                      })
-                    }
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-              {(pendingChecklistByTask[task.id] || []).map((draft) => (
-                <div key={draft.key} style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "5px" }}>
-                  <span style={{ flex: 1, fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontStyle: "italic", opacity: 0.85 }}>
-                    {draft.text}
-                  </span>
-                  <span style={{ fontSize: "9px", color: "var(--vscode-descriptionForeground)", whiteSpace: "nowrap" }}>
-                    {t("unsaved")}
-                  </span>
-                  <button
-                    className="icon-btn delete"
-                    onClick={() => removePendingChecklistItem(task.id, draft.key)}
+                    onClick={() => removeDraftChecklistItem(task.id, item.key)}
                   >
                     ×
                   </button>
@@ -1951,14 +1944,14 @@ export const App: React.FC = () => {
                     })
                   }
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {addPendingChecklistItem(task.id);}
+                    if (e.key === "Enter") {addDraftChecklistItem(task.id);}
                   }}
                   style={{ flex: 1, padding: "5px" }}
                 />
                 <button
                   className="icon-btn"
                   style={iconButtonStyle}
-                  onClick={() => addPendingChecklistItem(task.id)}
+                  onClick={() => addDraftChecklistItem(task.id)}
                   disabled={!(checklistDrafts[task.id] || "").trim()}
                   title={t("Add")}
                   aria-label={t("Add")}
@@ -1969,41 +1962,19 @@ export const App: React.FC = () => {
             </div>
             <div style={{ borderTop: "1px solid var(--vscode-widget-border)", paddingTop: "8px", marginTop: "8px" }}>
               <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "6px" }}>{t("Relations")}</div>
-              {(task.relations || []).map((relation) => {
+              {(draftRelationsByTask[task.id] || []).map((relation) => {
                 const target = boardData?.tasks[relation.targetTaskId];
                 return (
-                  <div key={relation.id} style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "5px" }}>
+                  <div key={relation.key} style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "5px" }}>
                     <span style={{ fontSize: "10px", color: "var(--vscode-descriptionForeground)", minWidth: "72px" }}>
-                      {relationLabels[relation.type]}
+                      {relationLabels[relation.relationType]}
                     </span>
                     <span style={{ flex: 1, fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {target?.title || t("Missing task")}
                     </span>
                     <button
                       className="icon-btn delete"
-                      onClick={() => deleteTaskRelation(task.id, relation.id)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                );
-              })}
-              {(pendingRelationsByTask[task.id] || []).map((draft) => {
-                const target = boardData?.tasks[draft.targetTaskId];
-                return (
-                  <div key={draft.key} style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "5px" }}>
-                    <span style={{ fontSize: "10px", color: "var(--vscode-descriptionForeground)", minWidth: "72px" }}>
-                      {relationLabels[draft.relationType]}
-                    </span>
-                    <span style={{ flex: 1, fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontStyle: "italic", opacity: 0.85 }}>
-                      {target?.title || t("Missing task")}
-                    </span>
-                    <span style={{ fontSize: "9px", color: "var(--vscode-descriptionForeground)", whiteSpace: "nowrap" }}>
-                      {t("unsaved")}
-                    </span>
-                    <button
-                      className="icon-btn delete"
-                      onClick={() => removePendingRelation(task.id, draft.key)}
+                      onClick={() => removeDraftRelation(task.id, relation.key)}
                     >
                       ×
                     </button>
@@ -2047,7 +2018,7 @@ export const App: React.FC = () => {
                 <button
                   className="icon-btn"
                   style={iconButtonStyle}
-                  onClick={() => addPendingRelation(task.id)}
+                  onClick={() => addDraftRelation(task.id)}
                   disabled={!relationTargetByTask[task.id]}
                   title={t("Link")}
                   aria-label={t("Link")}
