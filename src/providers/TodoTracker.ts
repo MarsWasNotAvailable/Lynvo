@@ -184,9 +184,10 @@ export async function removeMarkerFromFile(filePath: string, todoId: string): Pr
 
 /**
  * Remove the WHOLE TODO comment from the file, located by its marker token.
- * The marker sits on the comment's first line;
- * for block-style comments the full comment span is removed,
- * otherwise only that line is removed.
+ * The marker line may be the comment's opener line or a continuation line inside it;
+ * in both cases the entire comment is removed
+ * (a continuation marker removes its enclosing block, from the opener line to the closer line).
+ * For line comments, the consecutive comment run containing the marker is removed.
  * Returns its success.
  */
 export async function removeTodoCommentFromFile(filePath: string, todoId: string): Promise<boolean> {
@@ -200,58 +201,92 @@ export async function removeTodoCommentFromFile(filePath: string, todoId: string
   if (startIndex === -1) {
     return false;
   }
-  const firstLine = lines[startIndex].trimStart();
-  const isMultiline =  firstLine.startsWith("/*")   // C-like
-                    || firstLine.startsWith("<!--") // XML
-                    || firstLine.startsWith("--[[") // LUA
-                    ;
-  let endIndex = startIndex;
-  if (isMultiline) {
-    for (let j = startIndex; j < lines.length; j++) {
-      if (lines[j].includes("*/") || lines[j].includes("-->")|| lines[j].includes("]]")) {
-        endIndex = j;
-        break;
+  const { end: endIndex } = getCommentSpan(lines, startIndex);
+  // Remove the whole comment, not just the marker line:
+  // a continuation marker removes its enclosing block (opener -> closer),
+  // a line-comment marker removes the consecutive comment run it belongs to.
+  let removeStart = startIndex;
+  const enclosing = findEnclosingBlock(lines, startIndex);
+  if (enclosing) {
+    removeStart = enclosing.openerIndex;
+  } else {
+    const opener = lineCommentOpener(lines[startIndex].trimStart());
+    if (opener !== "") {
+      for (let k = startIndex - 1; k >= 0; k--) {
+        if ((lines[k] || "").trimStart().startsWith(opener)) {removeStart = k;}
+        else {break;}
       }
     }
   }
-  let removeCount = endIndex - startIndex + 1;
+  let removeCount = endIndex - removeStart + 1;
   // When the TODO comment is spaced out above and below,
   // the removal of the TODO comment leaves two blank line.
   // We attempt to remove the one below, if it exists.
   if (endIndex + 1 < lines.length && lines[endIndex + 1].trim() === "") {
     removeCount += 1;
   }
-  lines.splice(startIndex, removeCount);
+  lines.splice(removeStart, removeCount);
   await writeWorkspaceFileText(filePath, lines.join("\n"));
   return true;
 }
 
 /**
- * The marker token always sits on the FIRST line of a promoted TODO comment.
+ * The marker token sits on the TODO line of a promoted comment,
+ * which may be the comment's opener line OR a continuation line inside it
+ * (e.g. Python docstrings, where content conventionally starts on line 2).
  * These helpers read/write that comment
- * (title = first line, description = the remaining body),
+ * (title = TODO line, description = the body lines that follow it),
  * and are pure where possible so they can be unit-tested.
  */
 
-/** Find the index of the comment's closing line, given its first (marker) line. */
-function findCommentEndIndex(lines: string[], startIndex: number): number {
-  const first = (lines[startIndex] || "").trimStart();
-  let closer: string | undefined;
-  let tripleQuote = false;
-  if      (first.startsWith("/*"))     { closer = "*/"; }
-  else if (first.startsWith("<!--"))   { closer = "-->"; }
-  else if (first.startsWith("--[["))   { closer = "]]"; }
-  else if (first.startsWith("=begin")) { closer = "=end"; }
-  else if (first.startsWith("=pod"))   { closer = "=cut"; }
-  else if (first.startsWith("{-"))     { closer = "-}"; }
-  else if (first.startsWith('"""'))    { closer = '"""'; tripleQuote = true; }
-  else if (first.startsWith("'''"))    { closer = "'''"; tripleQuote = true; }
-  if (!closer) {return startIndex;}
-  // The closer may be on the same line (single-line block comment).
+/** Ordered (opener, closer) pairs of the block comment styles we support. */
+const BLOCK_COMMENT_PAIRS: Array<{ opener: string; closer: string; triple: boolean }> = [
+  { opener: "/*",     closer: "*/",   triple: false }, // C-like
+  { opener: "<!--",   closer: "-->", triple: false }, // XML / HTML
+  { opener: "--[[",   closer: "]]",  triple: false }, // Lua
+  { opener: "=begin", closer: "=end", triple: false }, // Ruby
+  { opener: "=pod",   closer: "=cut", triple: false }, // Perl
+  { opener: "{-",     closer: "-}",  triple: false }, // Haskell
+  { opener: '"""',    closer: '"""',  triple: true  }, // Python (double quotes)
+  { opener: "'''",    closer: "'''",  triple: true  }, // Python (single quotes)
+];
+
+/** Line-comment openers (no closing token; a block = consecutive repeated openers). */
+const LINE_COMMENT_OPENERS: string[] = ["//", "--", "#", ";"];
+
+/** Bounded upward scan distance when looking for an enclosing block opener. */
+const MAX_UPWARD_SCAN = 200;
+
+/** The block pair a (trimmed) line opens, or null when it opens none. */
+function findBlockPairForLine(trimmed: string): { opener: string; closer: string; triple: boolean } | null {
+  for (const pair of BLOCK_COMMENT_PAIRS) {
+    if (trimmed.startsWith(pair.opener)) {
+      return pair;
+    }
+  }
+  return null;
+}
+
+/** The line-comment opener a (trimmed) line starts with, or "" when none. */
+function lineCommentOpener(trimmed: string): string {
+  for (const opener of LINE_COMMENT_OPENERS) {
+    if (trimmed.startsWith(opener)) {
+      return opener;
+    }
+  }
+  return "";
+}
+
+/**
+ * Find the index of the block's closing line, scanning downward from `startIndex`.
+ * For `triple` openers (identical opener and closer, e.g. """),
+ * the `startIndex` line only counts when the closer is a distinct trailing token,
+ * so that the opener line itself is not mistaken for the close.
+ */
+function findBlockEnd(lines: string[], startIndex: number, closer: string, triple: boolean): number {
   for (let j = startIndex; j < lines.length; j++) {
     const line = lines[j];
-    if (tripleQuote) {
-      // The opener already contains the token; only count a distinct trailing close.
+    if (triple) {
       if (j === startIndex) {
         if (line.trim().endsWith(closer) && line.trim().length > closer.length) {return j;}
         continue;
@@ -264,11 +299,33 @@ function findCommentEndIndex(lines: string[], startIndex: number): number {
   return lines.length - 1;
 }
 
+/**
+ * Find the block opener that encloses the line at `startIndex` (a TODO continuation line),
+ * by scanning upward. A candidate block only counts when it is still open at `startIndex`
+ * (its closer lies below), so the already-closed blocks above are ignored.
+ * Returns the block pair and its opener line (and index), or null when not inside a block.
+ */
+function findEnclosingBlock(lines: string[], startIndex: number):
+  | { pair: { opener: string; closer: string; triple: boolean }; openerLine: string; openerIndex: number }
+  | null {
+  const limit = Math.max(0, startIndex - MAX_UPWARD_SCAN);
+  for (let k = startIndex - 1; k >= limit; k--) {
+    const pair = findBlockPairForLine((lines[k] || "").trimStart());
+    if (!pair) {continue;}
+    if (findBlockEnd(lines, k, pair.closer, pair.triple) > startIndex) {
+      return { pair, openerLine: lines[k], openerIndex: k };
+    }
+  }
+  return null;
+}
+
 /** Strip a single line's comment decoration (bullet, opener/closer) for display. */
 function stripLineDecoration(line: string): string {
   let t = line.trim();
   t = t.replace(/^(\*|\/\/|\/\*)\s?/, "");
   t = t.replace(/^(-->|\*\/|\]\])\s?/, "");
+  // A Lua-style `--` bullet (only when followed by whitespace, so `--foo` survives).
+  t = t.replace(/^--\s+/, "").replace(/^--$/, "");
   return t.trim();
 }
 
@@ -361,28 +418,50 @@ function renderBodyLines(body: Omit<TodoCommentPayload, "title">): string[] {
 }
 
 /**
- * The span of a TODO comment starting at `startIndex`.
- * Returns the closing-line index and the body lines in between.
- * NOTE : Multilines comments end at their closing sequence;
- * while line comments blocks end at the last consecutive line that repeats the opener.
+ * The span of a TODO comment located at `startIndex`.
+ * The TODO line may be the block opener itself (1),
+ * a continuation line (2) inside a block opened on an earlier line,
+ * a line comment (3) like `//`, `#`, `;` ,
+ * or a bare line (4) e.g. inside a Python docstring.
+ * Returns the closing-line index and the body lines in between;
+ * intro lines above the TODO line are not part of the body.
+ * NOTE : Block comments end at their closing sequence;
+ * line-comment blocks end at the last consecutive line that repeats the opener.
  */
-function commentSpan(lines: string[], startIndex: number): { end: number; bodyLines: string[] } {
-  const style = describeComment(lines[startIndex]);
-  if (style.closer !== null) {
-    const end = findCommentEndIndex(lines, startIndex);
+function getCommentSpan(lines: string[], startIndex: number): { end: number; bodyLines: string[] } {
+  const first = (lines[startIndex] || "").trimStart();
+
+  // 1) The line itself opens a block comment.
+  const selfPair = findBlockPairForLine(first);
+  if (selfPair) {
+    const end = findBlockEnd(lines, startIndex, selfPair.closer, selfPair.triple);
     return { end, bodyLines: lines.slice(startIndex + 1, end) };
   }
+
+  // 2) The line is a continuation inside a block opened above.
+  const block = findEnclosingBlock(lines, startIndex);
+  if (block) {
+    const end = findBlockEnd(lines, startIndex, block.pair.closer, block.pair.triple);
+    return { end, bodyLines: lines.slice(startIndex + 1, end) };
+  }
+
+  // Line-comment block: 
+  // 3) consecutive lines repeating the line opener
+  // 4) or a bare line.
+  const opener = lineCommentOpener(first);
   let end = startIndex;
-  for (let j = startIndex + 1; j < lines.length; j++) {
-    if (style.opener && lines[j].trimStart().startsWith(style.opener)) {end = j;}
-    else {break;}
+  if (opener) {
+    for (let j = startIndex + 1; j < lines.length; j++) {
+      if ((lines[j] || "").trimStart().startsWith(opener)) {end = j;}
+      else {break;}
+    }
   }
   return { end, bodyLines: lines.slice(startIndex + 1, end + 1) };
 }
 
 /** Derive the TODO comment description (as plain body lines) from source lines. */
 export function deriveDescription(lines: string[], startIndex: number): string {
-  const { bodyLines } = commentSpan(lines, startIndex);
+  const { bodyLines } = getCommentSpan(lines, startIndex);
   return parseBodyLines(bodyLines.map(stripLineDecoration)).description;
 }
 
@@ -394,100 +473,146 @@ export function parseTodoComment(
   const lines = text.split("\n");
   const start = lines.findIndex((line) => line.includes(todoId));
   if (start === -1) {return undefined;}
-  const { bodyLines } = commentSpan(lines, start);
+  const { bodyLines } = getCommentSpan(lines, start);
   const body = parseBodyLines(bodyLines.map(stripLineDecoration));
   return { title: deriveTitle(lines[start]), ...body };
 }
 
 /** Parse a TODO selection (title line + body) into a payload, without requiring a marker. */
 export function parseTodoSelection(lines: string[], startIndex: number): TodoCommentPayload {
-  const { bodyLines } = commentSpan(lines, startIndex);
+  const { bodyLines } = getCommentSpan(lines, startIndex);
   const body = parseBodyLines(bodyLines.map(stripLineDecoration));
   return { title: deriveTitle(lines[startIndex]), ...body };
 }
 
-/** Render the full promoted comment lines (title + marker + body) for insertion. */
+/** Render the full promoted comment lines (title + marker + body) for insertion at `startIndex`. */
 export function buildPromotedComment(
-  firstLine: string,
+  lines: string[],
+  startIndex: number,
   todoId: string,
   payload: TodoCommentPayload,
 ): string[] {
-  return renderTodoCommentLines(firstLine, todoId, payload);
+  return renderTodoCommentLines(describeComment(lines, startIndex), todoId, payload);
 }
 
 /** The closing-line index of the comment starting at `startIndex`. */
 export function getTodoCommentEndIndex(lines: string[], startIndex: number): number {
-  return commentSpan(lines, startIndex).end;
+  return getCommentSpan(lines, startIndex).end;
 }
 
 /** Render the full comment (title line + marker + body + closer) from a style + payload. */
 function renderTodoCommentLines(
-  firstLine: string,
+  style: CommentStyle,
   todoId: string,
   payload: TodoCommentPayload,
 ): string[] {
-  const style = describeComment(firstLine);
   const titleText = payload.title.trim() || "(untitled)";
   const bodyLines = renderBodyLines(payload);
   const titleLine = `${style.leadingWs}${style.opener}${style.prefix}${titleText} ${todoId}`;
   if (style.closer === null) {
     return [titleLine, ...bodyLines.map((b) => `${style.bodyPrefix}${b}`)];
   }
-  if (bodyLines.length === 0) {
+  // A single-line block comment keeps opener, title, marker and closer on one line.
+  if (bodyLines.length === 0 && style.openerOnThisLine) {
     return [`${style.leadingWs}${style.opener}${style.prefix}${titleText} ${todoId} ${style.closer}`];
   }
-  return [titleLine, ...bodyLines.map((b) => `${style.bodyPrefix}${b}`), `${style.leadingWs}${style.closer}`];
+  return [
+    titleLine,
+    ...bodyLines.map((b) => `${style.bodyPrefix}${b}`),
+    `${style.closerWs}${style.closer}`,
+  ];
 }
 
-/** Describe the comment's leading whitespace, opener/closer, and keyword prefix. */
-function describeComment(firstLine: string): {
+/** Renderable style of a TODO comment (opener, closer, prefixes). */
+interface CommentStyle {
   leadingWs: string;
   opener: string;
   closer: string | null;
+  closerWs: string;
+  openerOnThisLine: boolean;
   prefix: string;
   bodyPrefix: string;
-} {
-  const leadingWs = (firstLine.match(/^\s*/)?.[0] || "");
-  const trimmed = firstLine.trimStart();
-  let opener = "";
-  let closer: string | null = null;
-  if      (trimmed.startsWith("/*"))     {opener = "/*";     closer = "*/";}
-  else if (trimmed.startsWith("<!--"))   {opener = "<!--";   closer = "-->";}
-  else if (trimmed.startsWith("--[["))   {opener = "--[[";   closer = "]]";}
-  else if (trimmed.startsWith("=begin")) {opener = "=begin"; closer = "=end";}
-  else if (trimmed.startsWith("=pod"))   {opener = "=pod";   closer = "=cut";}
-  else if (trimmed.startsWith("{-"))     {opener = "{-";     closer = "-}";}
-  else if (trimmed.startsWith('"""'))    {opener = '"""';    closer = '"""';}
-  else if (trimmed.startsWith("'''"))    {opener = "'''";    closer = "'''";}
-  else if (trimmed.startsWith("//"))     {opener = "//";}
-  else if (trimmed.startsWith("#"))      {opener = "#";}
-  else if (trimmed.startsWith(";"))      {opener = ";";}
+}
 
-  // Reconstruct the prefix (keyword + separator) exactly as it was formatted,
-  // so that we keep the user's original TODO/IDEA/FIXME and its punctuation.
-  const afterOpener = trimmed.slice(opener.length);
-  let prefix = " ";
-  for (const kw of TODO_KEYWORDS) {
-    const idx = afterOpener.indexOf(kw);
+/** The keyword + separator as written after the opener (e.g. " TODO : "), or a single space. */
+function keywordPrefix(afterOpener: string): string {
+  for (const keyword of TODO_KEYWORDS) {
+    const idx = afterOpener.indexOf(keyword);
     if (idx !== -1) {
-      const after = afterOpener.slice(idx + kw.length);
+      const after = afterOpener.slice(idx + keyword.length);
       const m = after.match(/^[\s:.\-]+/);
       const sepLen = m ? m[0].length : 1;
-      prefix = afterOpener.slice(0, idx + kw.length + sepLen);
-      break;
+      return afterOpener.slice(0, idx + keyword.length + sepLen);
     }
   }
-  // Body (continuation) lines: repeat the opener for line comments,
-  // otherwise use a bullet aligned with the opener.
-  let bodyPrefix: string;
-  if (closer === null) {
-    bodyPrefix = `${leadingWs}${opener} `;
-  } else if (opener === "/*") {
-    bodyPrefix = `${leadingWs} * `;
-  } else {
-    bodyPrefix = `${leadingWs}  `;
+  return " ";
+}
+
+/** The comment decoration a continuation line carries itself (bullet or line-comment opener). */
+function continuationDecoration(trimmed: string): string {
+  // Bullet continuation (C-like ` * text`).
+  if (trimmed.startsWith("*") && (trimmed.length === 1 || /\s/.test(trimmed.charAt(1)))) {
+    return "*";
   }
-  return { leadingWs, opener, closer, prefix, bodyPrefix };
+  // Line-comment style inside a block (`-- TODO`, `# TODO`, ...).
+  const opener = lineCommentOpener(trimmed);
+  if (opener.length > 0 && (trimmed.length === opener.length || /\s/.test(trimmed.charAt(opener.length)))) {
+    return opener;
+  }
+  return "";
+}
+
+/**
+ * Describe the comment style used to render a TODO comment located at `startIndex`.
+ * A continuation line (inside a block opened above) inherits the block's closer,
+ * keeps its own bullet/opener, and aligns its closer line with the opener line's indentation.
+ */
+function describeComment(lines: string[], startIndex: number): CommentStyle {
+  const line = lines[startIndex] || "";
+  const leadingWs = (line.match(/^\s*/)?.[0]) || "";
+  const trimmed = line.trimStart();
+
+  // 1) The line itself opens a block comment.
+  const selfPair = findBlockPairForLine(trimmed);
+  if (selfPair) {
+    return {
+      leadingWs,
+      opener: selfPair.opener,
+      closer: selfPair.closer,
+      closerWs: leadingWs,
+      openerOnThisLine: true,
+      prefix: keywordPrefix(trimmed.slice(selfPair.opener.length)),
+      bodyPrefix: selfPair.opener === "/*" ? `${leadingWs} * ` : `${leadingWs}  `,
+    };
+  }
+
+  // 2) Continuation inside a block opened above.
+  const block = findEnclosingBlock(lines, startIndex);
+  if (block) {
+    const decoration = continuationDecoration(trimmed);
+    const openerLineWs = (block.openerLine.match(/^\s*/)?.[0]) || "";
+    return {
+      leadingWs,
+      opener: decoration,
+      closer: block.pair.closer,
+      closerWs: openerLineWs,
+      openerOnThisLine: false,
+      prefix: keywordPrefix(trimmed.slice(decoration.length)),
+      bodyPrefix: decoration.length > 0 ? `${leadingWs}${decoration} ` : leadingWs,
+    };
+  }
+
+  // 3) Line comment (`//`, `#`, `;`) or a bare line.
+  const opener = lineCommentOpener(trimmed);
+  return {
+    leadingWs,
+    opener,
+    closer: null,
+    closerWs: leadingWs,
+    openerOnThisLine: false,
+    prefix: keywordPrefix(trimmed.slice(opener.length)),
+    bodyPrefix: `${leadingWs}${opener} `,
+  };
 }
 
 /**
@@ -504,8 +629,8 @@ export function rewriteTodoComment(
   const lines = text.split("\n");
   const start = lines.findIndex((line) => line.includes(todoId));
   if (start === -1) {return undefined;}
-  const { end } = commentSpan(lines, start);
-  const newLines = renderTodoCommentLines(lines[start], todoId, payload);
+  const { end } = getCommentSpan(lines, start);
+  const newLines = renderTodoCommentLines(describeComment(lines, start), todoId, payload);
   return [...lines.slice(0, start), ...newLines, ...lines.slice(end + 1)].join("\n");
 }
 

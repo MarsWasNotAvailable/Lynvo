@@ -175,7 +175,8 @@ async function promoteTodo(): Promise<void> {
      const endLine = editor.document.lineAt(endIndex);
      const range = new vscode.Range(startLine.range.start, endLine.range.end);
      const newLines = buildPromotedComment(
-       docLines[item.lineIndex],
+       docLines,
+       item.lineIndex,
        item.todoId,
        {
          title: item.payload.title,
