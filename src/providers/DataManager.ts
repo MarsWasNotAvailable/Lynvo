@@ -969,10 +969,23 @@ export class DataManager {
       const user = await AuthProvider.getGitHubUser();
       this.addTombstone(board, "task", taskId, user);
       delete board.tasks[taskId];
+      // The deleted task's relations are now dangling:
+      // log each one as a relation deletion
+      // (the in-code mirror is cleaned up separately by the caller),
+      // then scrub it out of the other tasks' JSON.
       Object.values(board.tasks).forEach((task) => {
-        task.relations = (task.relations || []).filter(
-          (relation) => relation.targetTaskId !== taskId,
-        );
+        const relations = task.relations || [];
+        for (const relation of relations) {
+          if (relation.targetTaskId !== taskId) {continue;}
+          this.addActivity(
+            board,
+            generateRelationActivityType(relation.type, "deleted"),
+            `{${task.title}} <-> {${taskTitle}}`,
+            user,
+            { taskId: task.id, targetTaskId: taskId, metadata: { type: relation.type } },
+          );
+        }
+        task.relations = relations.filter((relation) => relation.targetTaskId !== taskId);
       });
       this.addActivity(board, "task_deleted", `{${taskTitle}}`, user, { taskId });
     });
