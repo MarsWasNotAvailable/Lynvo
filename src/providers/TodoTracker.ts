@@ -712,6 +712,32 @@ export async function replaceTodoComment(
   return await writeFileTextLiveOrDisk(filePath, next);
 }
 
+/**
+ * Remove dangling relation lines from a promoted TODO comment
+ * after the target task has been deleted.
+ *
+ * Promotion always rewrites a relation target to its `task-id {Title}` form,
+ * so we match the leading (whitespace-separated) token of each relation target
+ * against the deleted task's id. A `{Title}`-only or bare-title target will not
+ * match - which is safe, since those are not reliable identifiers to scrub.
+ *
+ * Returns `true` when nothing needed to change (no dangling relation),
+ * and `false` only when the file could not be read or written back.
+ */
+export async function removeDanglingRelationFromFile(
+  filePath: string,
+  todoId: string,
+  deletedTaskId: string,
+): Promise<boolean> {
+  const current = await readTodoComment(filePath, todoId);
+  if (!current) {return false;}
+  const targetsDeleted = (relation: TodoBodyRelation): boolean =>
+    relation.target.trim().split(/\s+/)[0] === deletedTaskId;
+  const kept = current.relations.filter((relation) => !targetsDeleted(relation));
+  if (kept.length === current.relations.length) {return true;}
+  return await replaceTodoComment(filePath, todoId, { ...current, relations: kept });
+}
+
 /** Whether board -> code propagation is enabled (opt-out setting). */
 export function isInCodeEditingEnabled(): boolean {
   try {

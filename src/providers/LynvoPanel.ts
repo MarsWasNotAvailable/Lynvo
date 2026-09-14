@@ -7,6 +7,7 @@ import {
   findMarkerLineIndex,
   isInCodeEditingEnabled,
   readTodoComment,
+  removeDanglingRelationFromFile,
   removeMarkerFromFile,
   removeTodoCommentFromFile,
   replaceTodoComment,
@@ -708,6 +709,35 @@ export class LynvoPanel {
               if (todoId && filePath && isSafeWorkspaceRelativePath(filePath)) {
                 // Demote: strip the marker token but keep the comment line itself.
                 await removeMarkerFromFile(filePath, todoId);
+              }
+              // Best-effort cleanup: remove dangling in-code relations in OTHER tasks
+              // that pointed at the deleted task (e.g. `[!] task-gone {Gone}`).
+              // A failing write must never abort the deletion,
+              // so we collect the failed files and surface a single warning afterwards.
+              const otherLinked = Object.values(board?.tasks || {}).filter(
+                (other) =>
+                  other.id !== taskId &&
+                  Boolean(other.codeReference?.todoId && other.codeReference?.filePath) &&
+                  isSafeWorkspaceRelativePath(other.codeReference!.filePath!),
+              );
+              const seen = new Set<string>();
+              const failedFiles: string[] = [];
+              for (const other of otherLinked) {
+                const linkedPath = other.codeReference!.filePath!;
+                const pairKey = `${linkedPath}::${other.codeReference!.todoId}`;
+                // Skip the deleted task's own file (already demoted above) and
+                // avoid touching the same (file, marker) pair twice.
+                if (filePath && linkedPath === filePath) {continue;}
+                if (seen.has(pairKey)) {continue;}
+                seen.add(pairKey);
+                if (!await removeDanglingRelationFromFile(linkedPath, other.codeReference!.todoId!, taskId)) {
+                  failedFiles.push(linkedPath);
+                }
+              }
+              if (failedFiles.length > 0) {
+                vscode.window.showWarningMessage(
+                  t("Some in-code relations to the deleted task could not be cleaned: {0}", failedFiles.join(", ")),
+                );
               }
               await DataManager.deleteTask(taskId);
               LynvoPanel.refreshDataAndScheduleSync();

@@ -471,6 +471,7 @@ Both **block** comments (`/* */`, `<!-- -->`, `--[[ ]]`) and **single-line** com
 - **Board → Code (primary):** saving a linked task (title, description, checklist, or relations) writes the in-code TODO comment **first**, to the open (possibly unsaved) buffer — it never forces a save. If that write fails, the board is **not** updated, so the user can fix the file and retry.
 - **Code → Board (user-controlled):** the board keeps showing the JSON until the user relinks. Divergence is detected on board load/refresh/reveal and via a debounced editor-change event while the board is open. There is **no** background file watcher and **no** implicit file→JSON write.
 - **Broken task:** the red indicator is informational only; the convert-to-normal prompt appears **only when the user clicks Edit**. Cancelling leaves the task unchanged.
+- **On-delete cleanup:** when a linked task is deleted, dangling in-code relation lines in *other* tasks' promoted comments that point at the deleted task are removed (matched by the leading `task-id` token). This is best-effort — a failing file write never aborts the deletion, and any files that could not be cleaned are surfaced in a single warning. The deleted task's own comment is demoted (marker stripped) rather than removed.
 - **Opt-out:** the setting `lynvo.enableInCodeEditing` (default `true`) gates all board → code propagation. When disabled, editing a linked task updates the board only and leaves the code comment untouched.
 
 ### Agent notes
