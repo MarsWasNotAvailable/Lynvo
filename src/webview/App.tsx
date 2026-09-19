@@ -10,6 +10,7 @@ import {
   LynvoTask,
   LynvoTaskRelationType,
 } from "../types";
+import { fullRelationsForTask, hasRelationBetween } from "../relationModel";
 
 type WebviewOutboundMessage =
   | { command: "requestData" }
@@ -55,7 +56,7 @@ type WebviewOutboundMessage =
       targetTaskId: string;
       relationType: LynvoTaskRelationType;
     }
-  | { command: "deleteTaskRelation"; taskId: string; relationId: string }
+  | { command: "deleteTaskRelation"; ownerId: string; relationId: string }
   | { command: "createColumn"; title: string; color: string }
   | { command: "editColumn"; colId: string; title: string; color: string }
   | { command: "deleteColumn"; colId: string }
@@ -1470,9 +1471,15 @@ export const App: React.FC = () => {
       ...prev,
       [task.id]: (task.checklist || []).map((item) => ({ key: `c-${item.id}`, id: item.id, text: item.text, done: item.done })),
     }));
+    // Seed the FULL relation set (own + derived `blocks`, schema 3.0.0)
+    // so that the edit form can show and edit every edge the task participates in,
+    // including `blocks` edges stored on the counterpart task.
+    const seedRelations: Array<{ relationId: string; targetTaskId: string; type: LynvoTaskRelationType }> = boardData
+      ? fullRelationsForTask(boardData, task.id).map((relation) => ({ relationId: relation.relationId, targetTaskId: relation.targetTaskId, type: relation.type }))
+      : (task.relations || []).map((relation) => ({ relationId: relation.id, targetTaskId: relation.targetTaskId, type: relation.type }));
     setDraftRelationsByTask((prev) => ({
       ...prev,
-      [task.id]: (task.relations || []).map((relation) => ({ key: `r-${relation.id}`, id: relation.id, targetTaskId: relation.targetTaskId, relationType: relation.type })),
+      [task.id]: seedRelations.map((relation) => ({ key: `r-${relation.relationId}`, id: relation.relationId, targetTaskId: relation.targetTaskId, relationType: relation.type })),
     }));
     setChecklistDrafts((prev) => ({ ...prev, [task.id]: "" }));
     setRelationTargetByTask((prev) => ({ ...prev, [task.id]: "" }));
@@ -1491,7 +1498,7 @@ export const App: React.FC = () => {
     const draftChecklist = draftChecklistByTask[taskId] || [];
     const draftRelations = draftRelationsByTask[taskId] || [];
 
-    const fieldsChanged =
+    const fieldsHasChanged =
       !task ||
       task.title !== title ||
       task.description !== editDesc ||
@@ -1500,16 +1507,22 @@ export const App: React.FC = () => {
       (task.dueDate ?? null) !== (nextDueDate ?? null);
 
     // Checklist order is user-visible, so compare in order.
-    const checklistChanged =
+    const checklistHasChanged =
       JSON.stringify(draftChecklist.map((item) => [item.text.trim(), item.done])) !==
       JSON.stringify((task?.checklist || []).map((item) => [item.text, item.done]));
 
     const relationKey = (type: LynvoTaskRelationType, target: string) => `${type}|${target}`;
-    const relationsChanged =
-      draftRelations.map((relation) => relationKey(relation.relationType, relation.targetTaskId)).sort().join("\n") !==
-      (task?.relations || []).map((relation) => relationKey(relation.type, relation.targetTaskId)).sort().join("\n");
+    // Compare against the task's FULL relation set (own + derived `blocks`),
+    // so that a change to a derived `blocks` edge is detected (schema 3.0.0).
+    const currentRelationKeys = (boardData ? fullRelationsForTask(boardData, taskId) : (task?.relations || []))
+    .map((relation) => relationKey(relation.type, relation.targetTaskId)).sort().join("\n");
 
-    if (!fieldsChanged && !checklistChanged && !relationsChanged) {
+    const relationsHasChanged =
+      draftRelations.map((relation) =>
+        relationKey(relation.relationType, relation.targetTaskId)).sort().join("\n")
+        !== currentRelationKeys;
+
+    if (!fieldsHasChanged && !checklistHasChanged && !relationsHasChanged) {
       setEditingTaskId(null);
       return;
     }
@@ -1547,6 +1560,13 @@ export const App: React.FC = () => {
     const done = checklist.filter((item) => item.done).length;
     return { done, total: checklist.length };
   };
+
+  // A task's relation count for badges:
+  // own stored + derived `blocks` (schema 3.0.0),
+  // matching what the relation lists display.
+  const getRelationCount = (task: LynvoTask) =>
+    boardData ? fullRelationsForTask(boardData, task.id).length
+              : (task.relations || []).length;
 
   // --- Edit-form checklist drafts (committed atomically on Save) ---
 
@@ -1608,24 +1628,27 @@ export const App: React.FC = () => {
     setDraftRelationsByTask((prev) => ({ ...prev, [taskId]: items }));
   };
 
-  const deleteTaskRelation = (taskId: string, relationId: string) => {
+  const deleteTaskRelation = (ownerId: string, relationId: string) => {
     if (!boardData) {return;}
-    const task = boardData.tasks[taskId];
-    if (!task) {return;}
+    // `ownerId` is the task that STORES the relation (the canonical owner).
+    // For a derived `blocks` edge shown on another task,
+    // this is that other task's `blocked-by` relation (schema 3.0.0 canonical model).
+    const owner = boardData.tasks[ownerId];
+    if (!owner) {return;}
 
     setBoardData({
       ...boardData,
       tasks: {
         ...boardData.tasks,
-        [taskId]: {
-          ...task,
-          relations: (task.relations || []).filter((relation) => relation.id !== relationId),
+        [ownerId]: {
+          ...owner,
+          relations: (owner.relations || []).filter((relation) => relation.id !== relationId),
         },
       },
     });
     vscode.postMessage({
       command: "deleteTaskRelation",
-      taskId,
+      ownerId,
       relationId,
     });
   };
@@ -1641,11 +1664,9 @@ export const App: React.FC = () => {
     const targetTask = boardData.tasks[targetTaskId];
     if (!sourceTask || !targetTask) {return;}
 
-    const exists = (sourceTask.relations || []).some(
-      (relation) =>
-        relation.targetTaskId === targetTaskId && relation.type === relationType,
-    );
-    if (exists) {return;}
+    // No-op when the pair is already linked in either direction
+    // (own or derived `blocks`, schema 3.0.0 canonical model).
+    if (hasRelationBetween(boardData, taskId, targetTaskId)) {return;}
 
     vscode.postMessage({
       command: "addTaskRelation",
@@ -1839,21 +1860,14 @@ export const App: React.FC = () => {
     const dueDate = task.dueDate;
     const isOverdue = Boolean(dueDate && dueDate < Date.now());
     const checklistProgress = getChecklistProgress(task);
-    // List as targetable tasks only the ones that are not already linked to this one
-    // in either direction (this -> candidate or candidate -> this),
+    // List as targetable tasks only the ones that are not already
+    // linked to this one in either direction (own or derived, schema 3.0.0),
     // and that are not already staged as a draft relation in this form.
-    const linkedTargets = new Set((task.relations || []).map((relation) => relation.targetTaskId));
     const pendingTargetIds = new Set((draftRelationsByTask[task.id] || []).map((draft) => draft.targetTaskId));
-    const linkedToThis = new Set(
-      tasks
-        .filter((candidate) => (candidate.relations || []).some((relation) => relation.targetTaskId === task.id))
-        .map((candidate) => candidate.id),
-    );
     const availableRelationTargets = tasks.filter(
       (candidate) =>
         candidate.id !== task.id &&
-        !linkedTargets.has(candidate.id) &&
-        !linkedToThis.has(candidate.id) &&
+        !(boardData ? hasRelationBetween(boardData, task.id, candidate.id) : false) &&
         !pendingTargetIds.has(candidate.id),
     );
 
@@ -2157,7 +2171,7 @@ export const App: React.FC = () => {
                   {t("{0}/{1} checks", checklistProgress.done, checklistProgress.total)}
                 </span>
               )}
-              {(task.relations || []).length > 0 && (
+              {getRelationCount(task) > 0 && (
                 <span
                   style={{
                     fontSize: "10px",
@@ -2167,7 +2181,7 @@ export const App: React.FC = () => {
                     color: "var(--vscode-descriptionForeground)",
                   }}
                 >
-                  {t("{0} links", (task.relations || []).length)}
+                  {t("{0} links", getRelationCount(task))}
                 </span>
               )}
             </div>
@@ -2327,13 +2341,13 @@ export const App: React.FC = () => {
                 )}
               </div>
             )}
-            {(task.relations || []).length > 0 && (
+            {boardData && fullRelationsForTask(boardData, task.id).length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "10px" }}>
-                {(task.relations || []).slice(0, 3).map((relation) => {
+                {fullRelationsForTask(boardData, task.id).slice(0, 3).map((relation) => {
                   const target = boardData?.tasks[relation.targetTaskId];
                   return (
                     <div
-                      key={relation.id}
+                      key={relation.relationId}
                       style={{
                         display: "grid",
                         gridTemplateColumns: "70px 1fr",
@@ -2712,8 +2726,10 @@ export const App: React.FC = () => {
       );
     });
 
+    // Full relation set per task (own stored + derived `blocks`)
+    // so the map shows every edge (schema 3.0.0 canonical model).
     const relationLines = mapTasks.flatMap((task) =>
-      (task.relations || []).map((relation) => ({
+      fullRelationsForTask(boardData, task.id).map((relation) => ({
         relation,
         source: task,
         target: boardData.tasks[relation.targetTaskId],
@@ -2722,7 +2738,7 @@ export const App: React.FC = () => {
 
     const selectedTask = selectedMapTaskId ? boardData.tasks[selectedMapTaskId] : null;
     const selectedColumn = selectedTask ? boardData.columns[selectedTask.status] : null;
-    const selectedRelations = selectedTask?.relations || [];
+    const selectedRelations = selectedTask ? fullRelationsForTask(boardData, selectedTask.id) : [];
 
 	    return (
       <div className="lynvo-table-shell">
@@ -2820,7 +2836,7 @@ export const App: React.FC = () => {
                       const isBlocking = relation.type === "blocks" || relation.type === "blocked-by";
                       return (
                         <line
-                          key={relation.id}
+                          key={relation.relationId}
                           x1={from.x}
                           y1={from.y}
                           x2={to.x}
@@ -2842,7 +2858,7 @@ export const App: React.FC = () => {
                     const isSelected = selectedMapTaskId === task.id;
                     const isLinkSource = isMapLinkMode && mapLinkSourceId === task.id;
                     const borderWidth = priority === "high" ? 5 : priority === "medium" ? 4 : 3;
-                    const relationCount = (task.relations || []).length;
+                    const relationCount = getRelationCount(task);
 
                     return (
                       <button
@@ -2924,14 +2940,14 @@ export const App: React.FC = () => {
                 {selectedRelations.length > 0 ? selectedRelations.map((relation) => {
                   const target = boardData.tasks[relation.targetTaskId];
                   return (
-                    <div className="lynvo-relation-row" key={relation.id}>
+                    <div className="lynvo-relation-row" key={relation.relationId}>
                       <div className="lynvo-relation-meta">
                         <strong>{target?.title || t("Missing task")}</strong>
                         <span style={{ color: "var(--vscode-descriptionForeground)" }}>{relationLabels[relation.type]}</span>
                       </div>
                       <button
                         className="lynvo-danger-button"
-                        onClick={() => deleteTaskRelation(selectedTask.id, relation.id)}
+                        onClick={() => deleteTaskRelation(relation.ownerId, relation.relationId)}
                       >
                         {t("Delete")}
                       </button>
@@ -3056,7 +3072,7 @@ export const App: React.FC = () => {
                           : "—"}
                       </td>
                       <td style={{ padding: "10px", verticalAlign: "top", fontSize: "12px" }}>
-                        {(task.relations || []).length || "—"}
+                        {getRelationCount(task) || "—"}
                       </td>
                       <td style={{ padding: "10px", verticalAlign: "top", fontSize: "11px", color: "var(--vscode-descriptionForeground)" }}>
                         {formatDateTime(task.updatedAt)}

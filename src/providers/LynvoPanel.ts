@@ -2,11 +2,19 @@ import * as vscode from "vscode";
 import { DataManager } from "./DataManager";
 import { GitService } from "./GitService";
 import { getWebviewBundle, t } from "../l10n";
-import { LynvoBoard, LynvoTaskRelationType } from "../types";
+import {
+  applyRelationPlan,
+  canonicalizeRelation,
+  findChangedCounterpartIds,
+  fullRelationsForTask,
+  planRelationChanges,
+} from "../relationModel";
+import { LynvoBoard, LynvoTask, LynvoTaskRelation, LynvoTaskRelationType } from "../types";
 import {
   findMarkerLineIndex,
   isInCodeEditingEnabled,
   readTodoComment,
+  removeTodoCommentRelationsFromFile,
   removeDanglingRelationFromFile,
   removeMarkerFromFile,
   removeTodoCommentFromFile,
@@ -64,6 +72,9 @@ async function computeCodeLinkStates(
         checklistSignature(
           (task.checklist || []).map((entry) => ({ text: entry.text, done: entry.done })),
         );
+      // Board side:
+      // the task's FULL relation set (own stored + derived `blocks` from other tasks' `blocked-by`),
+      // matching what is rendered into the in-code comment (schema 3.0.0 canonical model).
       const relationsMatch =
         relationSignature(
           parsed.relations.map((relation) => ({
@@ -72,7 +83,7 @@ async function computeCodeLinkStates(
           })),
         ) ===
         relationSignature(
-          (task.relations || []).map((relation) => ({
+          fullRelationsForTask(board, task.id).map((relation) => ({
             type: relation.type,
             targetId: relation.targetTaskId,
           })),
@@ -267,25 +278,43 @@ const diffChecklist = (
   return { added, updated, removed };
 };
 
-/** Reconcile an incoming full relation list against the board's current one. */
-const diffRelations = (
-  existing: Array<{ id: string; type: LynvoTaskRelationType; targetTaskId: string }>,
-  incoming: BoardRelation[],
-): { added: BoardRelation[]; removed: string[] } => {
-  const key = (type: LynvoTaskRelationType, targetTaskId: string) =>
-    `${type}::${targetTaskId}`;
-  const incomingKeys = new Set(incoming.map((r) => key(r.type, r.targetTaskId)));
-  const existingKeys = new Set(
-    existing.map((r) => key(r.type, r.targetTaskId)),
-  );
-  const removed = existing
-    .filter((r) => !incomingKeys.has(key(r.type, r.targetTaskId)))
-    .map((r) => r.id);
-  const added = incoming.filter(
-    (r) => !existingKeys.has(key(r.type, r.targetTaskId)),
-  );
-  return { added, removed };
+/**
+ * Apply a set of "owner task -> desired own relations" assignments
+ * to a shallow clone of the board's tasks.
+ * The result is a board object whose relation data reflects a pending change,
+ * used only to derive each affected task's full relation set (own + derived `blocks`)
+ * so that the in-code comment renders the correct relation lines (schema 3.0.0 canonical model).
+ */
+const withSimulatedRelations = (
+  board: LynvoBoard,
+  assignments: Record<string, BoardRelation[]>,
+): LynvoBoard => {
+  const tasks: Record<string, LynvoTask> = {};
+  for (const [id, task] of Object.entries(board.tasks)) {
+    tasks[id] = { ...task, relations: (task.relations || []).slice() };
+  }
+  for (const [ownerId, desired] of Object.entries(assignments)) {
+    const owner = tasks[ownerId];
+    if (!owner) {continue;}
+    owner.relations = desired.map((relation, index) => ({
+      id: `sim-${ownerId}-${index}`,
+      type: relation.type,
+      targetTaskId: relation.targetTaskId,
+      createdAt: 0,
+    })) as LynvoTaskRelation[];
+  }
+  return { ...board, tasks };
 };
+
+/** The render-ready relation lines (`type` + `target`) for a task, derived from a board. */
+const fullRelationLines = (
+  board: LynvoBoard,
+  taskId: string,
+): BoardRelation[] =>
+  fullRelationsForTask(board, taskId).map((relation) => ({
+    type: relation.type,
+    targetTaskId: relation.targetTaskId,
+  }));
 
 const CODE_SYNC_ERROR =
   "Could not write to the linked code file. The board was not updated — fix the file and try again.";
@@ -492,6 +521,30 @@ export class LynvoPanel {
     }
   }
 
+  /**
+   * Re-sync the in-code TODO comment(s) of the given tasks
+   * so that their relation lines match the current board state (schema 3.0.0 canonical model).
+   * Used after an action (e.g. Promote) creates relation-edges whose counterpart
+   * task is code-linked, so that both halves of a `blocks`/`blocked-by` edge
+   * render in their respective comments and the promoted task stays synchronized.
+   * Safe with empty/unknown IDs: non-linked tasks are skipped.
+   */
+  public static async refreshLinkedTaskRelations(taskIds: string[]): Promise<void> {
+    if (taskIds.length === 0) {
+      return;
+    }
+    const board = await DataManager.loadBoard();
+    if (!board) { return; }
+    for (const taskId of taskIds) {
+      if (!board.tasks[taskId]) {
+        continue;
+      }
+      await syncLinkedTaskToCode(board, taskId, {
+        relations: fullRelationLines(board, taskId),
+      });
+    }
+  }
+
   private static async refreshDataAndScheduleSync() {
     await LynvoPanel.refreshData();
     GitService.scheduleBoardSync(15000, (result) => {
@@ -551,9 +604,9 @@ export class LynvoPanel {
             // Task titles are unique: reject a duplicate (case-insensitive).
             const board = await DataManager.loadBoard();
             if (board && DataManager.hasTaskWithTitle(board, title)) {
-              // Refuse the creation but keep the Task Creation View open so the
-              // user's draft (title, description, ...) is not lost. Surface the
-              // reason inline in the webview instead of a one-off popup.
+              // Refuse the creation but keep the Task Creation View open
+              // so that the user's draft (title, description, ...) is not lost.
+              // Surface the reason inline in the webview instead of a one-off popup.
               webview.postMessage({
                 command: "createTaskResult",
                 success: false,
@@ -601,7 +654,7 @@ export class LynvoPanel {
               ? asRelationTargets(message.relations)
               : (task.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId }));
 
-            const fieldsChanged =
+            const fieldsHasChanged =
               task.title !== title ||
               task.description !== description ||
               JSON.stringify(task.labelIds || []) !== JSON.stringify(labelIds) ||
@@ -609,15 +662,17 @@ export class LynvoPanel {
               (task.dueDate ?? null) !== (dueDate ?? null);
 
             const checklistDiff = diffChecklist(task.checklist || [], effectiveChecklist);
-            const relationsDiff = diffRelations(task.relations || [], effectiveRelations);
-            const checklistChanged =
+            // Reconcile the task's FULL relation set (own + derived `blocks`)
+            // against the desired set, comparing by canonical edge key (schema 3.0.0).
+            const relationsPlan = planRelationChanges(board, taskId, effectiveRelations);
+            const checklistHasChanged =
               checklistDiff.added.length > 0 ||
               checklistDiff.updated.length > 0 ||
               checklistDiff.removed.length > 0;
-            const relationsChanged =
-              relationsDiff.added.length > 0 || relationsDiff.removed.length > 0;
+            const relationsHasChanged =
+              relationsPlan.edgeToAdd.length > 0 || relationsPlan.edgeToRemove.length > 0;
 
-            if (!fieldsChanged && !checklistChanged && !relationsChanged) {
+            if (!fieldsHasChanged && !checklistHasChanged && !relationsHasChanged) {
               return;
             }
 
@@ -629,24 +684,43 @@ export class LynvoPanel {
 
             // For a promoted task, selected fields are bound to the in-code TODO comment :
             // Title, Description, Checklist, Relations.
-            // We try to write the code ONCE with the full final content,
-            // BEFORE committing anything to the board;
-            // if it fails, we keep no partial state, we abort so the user can fix the file and retry.
+            // We write the code BEFORE committing the board;
+            // if any linked write fails,
+            // we keep no partial state so the user can fix the file and retry.
+            // The FINAL relation state after this save (adds + removals),
+            // used to render the in-code comment(s) consistently (schema 3.0.0).
+            const finalBoard = applyRelationPlan(board, taskId, relationsPlan);
+
             if (isLinked) {
-              const ok = await syncLinkedTaskToCode(board, taskId, {
+              const okSelf = await syncLinkedTaskToCode(board, taskId, {
                 title,
                 description,
                 checklist: effectiveChecklist.map((entry) => ({ text: entry.text, done: entry.done })),
-                relations: effectiveRelations,
+                relations: fullRelationLines(finalBoard, taskId),
               });
-              if (!ok) {
+              if (!okSelf) {
+                vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
+                return;
+              }
+            }
+
+            // `blocks`/`blocked-by` are reciprocal and render on BOTH comments.
+            // The counterpart task holds the other half of the edge and is
+            // often the one that is code-linked (even when the edited task is not),
+            // so we refresh its in-code comment regardless of the edited task's link state.
+            for (const targetId of findChangedCounterpartIds(relationsPlan)) {
+              if (!board.tasks[targetId] || targetId === taskId) {continue;}
+              const okTarget = await syncLinkedTaskToCode(board, targetId, {
+                relations: fullRelationLines(finalBoard, targetId),
+              });
+              if (!okTarget) {
                 vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
                 return;
               }
             }
 
             // Commit the board changes (remove, then update, then add).
-            if (fieldsChanged) {
+            if (fieldsHasChanged) {
               await DataManager.editTask(
                 taskId,
                 title,
@@ -675,10 +749,12 @@ export class LynvoPanel {
             for (const item of checklistDiff.added) {
               await DataManager.addChecklistItem(taskId, item.text, item.done);
             }
-            for (const id of relationsDiff.removed) {
-              await DataManager.deleteTaskRelation(taskId, id);
+            // Commit relation changes by canonical edge :
+            // a derived `blocks` is removed from or added onto its owner task (schema 3.0.0).
+            for (const edge of relationsPlan.edgeToRemove) {
+              await DataManager.deleteTaskRelation(edge.ownerId, edge.relationId);
             }
-            for (const relation of relationsDiff.added) {
+            for (const relation of relationsPlan.edgeToAdd) {
               await DataManager.addTaskRelation(taskId, relation.targetTaskId, relation.type);
             }
 
@@ -707,7 +783,13 @@ export class LynvoPanel {
             );
             if (confirmTask === deleteLabel) {
               if (todoId && filePath && isSafeWorkspaceRelativePath(filePath)) {
-                // Demote: strip the marker token but keep the comment line itself.
+                // When deleting a linked task, we essentially try to unhook the code;
+                // there are some bits we intentionally leave behind - but not broken relations.
+                // The deleted task's own comment may still declare relations (e.g. `[|] task`);
+                // those edges no longer exist in the board, so we scrub them before demoting
+                // (the marker is still present here, which is what locates the comment).
+                await removeTodoCommentRelationsFromFile(filePath, todoId);
+                // Demote: strip the marker token but keep the comment body itself.
                 await removeMarkerFromFile(filePath, todoId);
               }
               // Best-effort cleanup: remove dangling in-code relations in OTHER tasks
@@ -725,9 +807,10 @@ export class LynvoPanel {
               for (const other of otherLinked) {
                 const linkedPath = other.codeReference!.filePath!;
                 const pairKey = `${linkedPath}::${other.codeReference!.todoId}`;
-                // Skip the deleted task's own file (already demoted above) and
-                // avoid touching the same (file, marker) pair twice.
-                if (filePath && linkedPath === filePath) {continue;}
+                // NOTE : `otherLinked` already excludes the deleted task, and every task has a unique marker,
+                // so a task living in the SAME file as the deleted one is still processed;
+                // its comment is located by its own marker, independent of the deleted task's.
+                // Do NOT skip by file, otherwise a sibling task's dangling relation line would survive.
                 if (seen.has(pairKey)) {continue;}
                 seen.add(pairKey);
                 if (!await removeDanglingRelationFromFile(linkedPath, other.codeReference!.todoId!, taskId)) {
@@ -920,55 +1003,84 @@ export class LynvoPanel {
             const taskId = asString(message.taskId);
             const targetTaskId = asString(message.targetTaskId);
             const relationType = asRelationType(message.relationType);
-            if (!taskId || !targetTaskId || !relationType) {
+            if (!taskId || !targetTaskId || !relationType || taskId === targetTaskId) {
               return;
             }
             const board = await DataManager.loadBoard();
-            const task = board?.tasks[taskId];
-            if (board && task) {
-              const relations = [
-                ...(task.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId })),
-                { type: relationType, targetTaskId },
-              ];
-              const ok = await syncLinkedTaskToCode(board, taskId, {
-                checklist: (task.checklist || []).map((entry) => ({ text: entry.text, done: entry.done })),
-                relations,
-              });
-              if (!ok) {
-                vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
-                return;
-              }
-            }
-            await DataManager.addTaskRelation(
+            if (!board) {return;}
+            // Canonicalize (schema 3.0.0):
+            // a "blocks" edge is stored on the target task as a reciprocal "blocked-by".
+            const { ownerId, storedType, targetId } = canonicalizeRelation(
               taskId,
-              targetTaskId,
               relationType,
+              targetTaskId,
             );
+            if (ownerId === targetId || !board.tasks[ownerId] || !board.tasks[targetId]) {
+              return;
+            }
+
+            // The edge appears in BOTH comments of each tasks
+            // (original on one, the derived edge on the other),
+            // so render both from a simulated board first;
+            // the board is committed only after every linked write succeeds.
+            const owner = board.tasks[ownerId];
+            const assignments: Record<string, BoardRelation[]> = {
+              [ownerId]: [
+                ...(owner.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId })),
+                { type: storedType, targetTaskId: targetId },
+              ],
+            };
+            const sim = withSimulatedRelations(board, assignments);
+            const affected = Array.from(new Set([taskId, targetTaskId]));
+            let ok = true;
+            for (const affectedId of affected) {
+              const written = await syncLinkedTaskToCode(board, affectedId, {
+                relations: fullRelationLines(sim, affectedId),
+              });
+              if (!written) {ok = false;break;}
+            }
+            if (!ok) {
+              vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
+              return;
+            }
+            await DataManager.addTaskRelation(taskId, targetTaskId, relationType);
             LynvoPanel.refreshDataAndScheduleSync();
             return;
           }
           case "deleteTaskRelation": {
-            const taskId = asString(message.taskId);
+            // The webview sends the canonical owner (the task that stores the relation);
+            // fall back to `taskId` for older messages.
+            const ownerId = asString(message.ownerId) || asString(message.taskId);
             const relationId = asString(message.relationId);
-            if (!taskId || !relationId) {
+            if (!ownerId || !relationId) {
               return;
             }
             const board = await DataManager.loadBoard();
-            const task = board?.tasks[taskId];
-            if (board && task) {
-              const relations = (task.relations || [])
-                .filter((relation) => relation.id !== relationId)
-                .map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId }));
-              const ok = await syncLinkedTaskToCode(board, taskId, {
-                checklist: (task.checklist || []).map((entry) => ({ text: entry.text, done: entry.done })),
-                relations,
+            const owner = board?.tasks[ownerId];
+            if (!board || !owner) {return;}
+            const relation = (owner.relations || []).find((candidate) => candidate.id === relationId);
+            if (!relation) {return;}
+            const targetId = relation.targetTaskId;
+
+            const assignments: Record<string, BoardRelation[]> = {
+              [ownerId]: (owner.relations || [])
+                .filter((candidate) => candidate.id !== relationId)
+                .map((candidate) => ({ type: candidate.type, targetTaskId: candidate.targetTaskId })),
+            };
+            const sim = withSimulatedRelations(board, assignments);
+            const affected = Array.from(new Set([ownerId, targetId]));
+            let ok = true;
+            for (const affectedId of affected) {
+              const written = await syncLinkedTaskToCode(board, affectedId, {
+                relations: fullRelationLines(sim, affectedId),
               });
-              if (!ok) {
-                vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
-                return;
-              }
+              if (!written) {ok = false;break;}
             }
-            await DataManager.deleteTaskRelation(taskId, relationId);
+            if (!ok) {
+              vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
+              return;
+            }
+            await DataManager.deleteTaskRelation(ownerId, relationId);
             LynvoPanel.refreshDataAndScheduleSync();
             return;
           }
@@ -1176,9 +1288,10 @@ export class LynvoPanel {
             for (const item of checklistDiff.added) {
               await DataManager.addChecklistItem(taskId, item.text, item.done);
             }
-            // Relations: resolve each code target to a task and reconcile
-            // A task is deduced from task-id, a Lynvo marker, or a {Title} ;
-            // The unresolvable targets are skipped (no task).
+            // Relations: reconcile the task's FULL relation set (own + derived `blocks`)
+            // against the code, using canonical edge keys so that a `blocks` edge
+            // (stored on the other task as `blocked-by`) is handled correctly
+            // in both directions. Unresolvable targets are skipped (no task).
             const codeRelations: BoardRelation[] = parsed.relations
               .map((relation) => {
                 const resolved = resolveRelationTarget(board!, relation.target);
@@ -1187,13 +1300,31 @@ export class LynvoPanel {
                   : undefined;
               })
               .filter((relation): relation is BoardRelation => relation !== undefined);
-            const relationsDiff = diffRelations(task.relations || [], codeRelations);
-            for (const id of relationsDiff.removed) {
-              await DataManager.deleteTaskRelation(taskId, id);
+
+            // Reconcile the board to the code's full relation set.
+            const plan = planRelationChanges(board!, taskId, codeRelations);
+            for (const subtractive of plan.edgeToRemove) {
+              await DataManager.deleteTaskRelation(subtractive.ownerId, subtractive.relationId);
             }
-            for (const relation of relationsDiff.added) {
-              await DataManager.addTaskRelation(taskId, relation.targetTaskId, relation.type);
+            for (const additive of plan.edgeToAdd) {
+              await DataManager.addTaskRelation(taskId, additive.targetTaskId, additive.type);
             }
+
+            // `blocks`/`blocked-by` are reciprocal and render on BOTH comments,
+            // so we refresh the counterpart tasks' in-code comments to match the board.
+            const counterpartsIds = findChangedCounterpartIds(plan);
+            if (counterpartsIds.size > 0) {
+              const freshBoard = await DataManager.loadBoard();
+              if (freshBoard) {
+                for (const id of counterpartsIds) {
+                  if (!freshBoard.tasks[id]) {continue;}
+                  await syncLinkedTaskToCode(freshBoard, id, {
+                    relations: fullRelationLines(freshBoard, id),
+                  });
+                }
+              }
+            }
+
             vscode.window.showInformationMessage(t("Task re-synced from code."));
             LynvoPanel.refreshDataAndScheduleSync();
             return;

@@ -738,6 +738,25 @@ export async function removeDanglingRelationFromFile(
   return await replaceTodoComment(filePath, todoId, { ...current, relations: kept });
 }
 
+/**
+ * Remove ALL relation lines from a promoted TODO comment.
+ * Used when the owning task is deleted: any relation it declared (e.g. `[|] {Task}`)
+ * no longer exists in the board, so it would dangle in the code.
+ * Keeps the title, description and checklist;
+ * the marker is preserved here (a separate demote step strips it).
+ * Returns `true` on write success or when nothing needed to change,
+ * and `false` only when the file could not be read or written back.
+ */
+export async function removeTodoCommentRelationsFromFile(
+  filePath: string,
+  todoId: string,
+): Promise<boolean> {
+  const current = await readTodoComment(filePath, todoId);
+  if (!current) {return false;}
+  if (current.relations.length === 0) {return true;}
+  return await replaceTodoComment(filePath, todoId, { ...current, relations: [] });
+}
+
 /** Whether board -> code propagation is enabled (opt-out setting). */
 export function isInCodeEditingEnabled(): boolean {
   try {

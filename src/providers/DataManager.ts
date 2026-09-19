@@ -17,11 +17,14 @@ import {
 } from "../types";
 import { AuthProvider } from "./AuthProvider";
 import { t } from "../l10n";
+import { canonicalizeRelation } from "../relationModel";
 import {
+  compareSemVer,
   getChangelogUrl,
   getSchemaVersion,
   majorDiffers,
   maxVersion,
+  parseSemVer,
 } from "../schema";
 
 type BoardMetadata = {
@@ -32,15 +35,16 @@ type BoardMetadata = {
 const UNKNOWN_USER = { githubId: "unknown", username: "Unknown" };
 
 // Map a task relation type to its specific activity type.
-// `related` uses the legacy catch-all `relation_added` / `relation_deleted`;
-// the other types (blocks, blocked-by, duplicates) have dedicated added/removed types.
+// `related` uses the legacy catch-all `relation_added` / `relation_deleted`.
+// `blocks` and `blocked-by` are the same edge (reciprocal), so both log :
+// `relation_blockedby_*` for consistency (schema 3.0.0 stores only `blocked-by`).
+// `relation_block_added` / `relation_block_deleted` are kept for legacy entries.
 const generateRelationActivityType = (
   relationType: LynvoTaskRelationType,
   verb: "added" | "deleted",
 ): LynvoActivityType => {
   switch (relationType) {
     case "blocks":
-      return `relation_block_${verb}`;
     case "blocked-by":
       return `relation_blockedby_${verb}`;
     case "duplicates":
@@ -592,11 +596,11 @@ export class DataManager {
   }
 
   /**
-   * Read the raw schema version persisted on disk, without applying the
-   * "stamp only if higher" logic. Returns the first version found, or null
-   * when there is no board data yet.
+   * Read the raw schema version persisted on disk,
+   * without applying the "stamp only if higher" logic.
+   * Returns the first version found, or null when there is no board data yet.
    */
-  private static async readPersistedVersion(): Promise<string | null> {
+  public static async readPersistedVersion(): Promise<string | null> {
     const boardUri = this.joinModularPath("board.json");
     if (boardUri && (await this.exists(boardUri))) {
       try {
@@ -671,6 +675,96 @@ export class DataManager {
     );
     if (choice === openButton) {
       await vscode.env.openExternal(vscode.Uri.parse(getChangelogUrl()));
+    }
+  }
+
+  /**
+   * Migrate stored relation data to the canonical schema 3.0.0 model.
+   * For every stored "blocks A->B", ensure B has a "blocked-by -> A" (dedup),
+   * then drop A's "blocks" entry. Only `blocks` / `blocked-by` are touched;
+   * `related` / `duplicates` keep their stored direction.
+   * Finally the board version is stamped to the extension's schema version.
+   */
+  public static async migrateRelationsSchema(): Promise<void> {
+    await this.mutateBoard((board) => {
+      for (const task of Object.values(board.tasks)) {
+        const relations = task.relations || [];
+        if (!relations.some((relation) => relation.type === "blocks")) {
+          continue;
+        }
+        const kept: LynvoTaskRelation[] = [];
+        for (const relation of relations) {
+          if (relation.type !== "blocks") {
+            kept.push(relation);
+            continue;
+          }
+          // "blocks A->B" becomes "blocked-by -> A" stored on B.
+          const target = board.tasks[relation.targetTaskId];
+          if (target) {
+            const targetRelations = target.relations || [];
+            const already = targetRelations.some(
+              (existing) =>
+                existing.type === "blocked-by" && existing.targetTaskId === task.id,
+            );
+            if (!already) {
+              target.relations = [
+                ...targetRelations,
+                {
+                  id: this.createId("rel"),
+                  type: "blocked-by",
+                  targetTaskId: task.id,
+                  createdAt: relation.createdAt,
+                },
+              ];
+            }
+          }
+          // The source "blocks" entry is intentionally dropped (not kept).
+        }
+        task.relations = kept;
+      }
+      board.version = getSchemaVersion();
+    });
+  }
+
+  /**
+   * Offer a one-time migration prompt when the persisted board data is
+   * on an OLDER major schema than this extension (e.g. 2.x -> 3.x).
+   * Only offered when this extension is the newest (persisted major < extension major).
+   * On acceptance it rewrites stored `blocks` into reciprocal `blocked-by`.
+   * Declining leaves the data untouched (still readable).
+   */
+  public static async promptAndMigrateIfNeeded(
+    persistedVersion?: string | null,
+  ): Promise<void> {
+    const dbVersion = persistedVersion ?? (await this.readPersistedVersion());
+    if (!dbVersion) {
+      return; // No board data yet -> nothing to migrate.
+    }
+    const extVersion = getSchemaVersion();
+    // Only migrate when the stored schema is strictly OLDER
+    // by major version (e.g. 2.x -> 3.x).
+    // Minor/patch-only differences and newer schemas are intentionally left alone.
+    if (compareSemVer(dbVersion, extVersion) >= 0) {
+      // Stored schema is the same or newer -> nothing to migrate.
+      return;
+    }
+    if (parseSemVer(dbVersion).major >= parseSemVer(extVersion).major) {
+      // Same major -> not an older (breaking) schema.
+      return;
+    }
+
+    const updateButton = t("Update data");
+    const choice = await vscode.window.showWarningMessage(
+      t(
+        "Lynvo: your board data is on an older schema ({0}) than this extension ({1}). Update the data to the new schema?",
+        dbVersion,
+        extVersion,
+      ),
+      { modal: true },
+      updateButton,
+    );
+    if (choice === updateButton) {
+      await this.migrateRelationsSchema();
     }
   }
 
@@ -843,6 +937,54 @@ export class DataManager {
       }
 
       const now = Date.now();
+
+      // Canonicalize incoming relations (schema 3.0.0):
+      //  - non-"blocks" types are stored on the new task (as-is);
+      //  - "blocks A->B" is stored as a reciprocal "blocked-by -> A" on B.
+      // Target tasks must already exist; unresolvable targets are skipped.
+      const ownRelations: LynvoTaskRelation[] = [];
+      // Each actually-added edge is recorded so that an activity is logged for it
+      // (createTask is the only relation-creator that did not log, unlike addTaskRelation).
+      const addedEdges: Array<{ type: LynvoTaskRelationType; ownerTitle: string; targetTitle: string; ownerId: string; targetId: string }> = [];
+      for (const entry of relations) {
+        const target = board.tasks[entry.targetTaskId];
+        if (!target || entry.targetTaskId === taskId) {continue;}
+        const { ownerId, storedType, targetId } = canonicalizeRelation(
+          taskId,
+          entry.type,
+          entry.targetTaskId,
+        );
+        const ownerTask = board.tasks[ownerId];
+        if (ownerId === taskId) {
+          // Dedup the exact canonical edge on the new task.
+          const exists = ownRelations.some(
+            (relation) => relation.type === storedType && relation.targetTaskId === targetId,
+          );
+          if (!exists) {
+            ownRelations.push({
+              id: this.createId("rel"),
+              type: storedType,
+              targetTaskId: targetId,
+              createdAt: now,
+            });
+            addedEdges.push({ type: storedType, ownerTitle: title, targetTitle: target.title, ownerId, targetId });
+          }
+        } else {
+          // "blocks" -> the target task gains a "blocked-by" pointing at the new task.
+          const targetRelations = target.relations || [];
+          const exists = targetRelations.some(
+            (relation) => relation.type === storedType && relation.targetTaskId === taskId,
+          );
+          if (!exists) {
+            target.relations = [
+              ...targetRelations,
+              { id: this.createId("rel"), type: storedType, targetTaskId: taskId, createdAt: now },
+            ];
+            addedEdges.push({ type: storedType, ownerTitle: ownerTask?.title || ownerId, targetTitle: title, ownerId, targetId });
+          }
+        }
+      }
+
       board.tasks[taskId] = {
         id: taskId,
         title,
@@ -864,14 +1006,23 @@ export class DataManager {
           createdAt: now,
           updatedAt: now,
         })),
-        relations: relations.map((entry) => ({
-          id: this.createId("rel"),
-          type: entry.type,
-          targetTaskId: entry.targetTaskId,
-          createdAt: now,
-        })),
+        relations: ownRelations,
       };
       this.addActivity( board, "task_created", `{${title}}`, user, { taskId } );
+      // Log each relation added during promotion (parity with addTaskRelation):
+      // blocks/blocked-by -> relation_blockedby_added,
+      // duplicates -> relation_duplicates_added,
+      // related -> relation_added.
+      // The message is canonical-owner first, then target.
+      for (const edge of addedEdges) {
+        this.addActivity(
+          board,
+          generateRelationActivityType(edge.type, "added"),
+          `{${edge.ownerTitle}} <+> {${edge.targetTitle}}`,
+          user,
+          { taskId, targetTaskId: edge.targetId, metadata: { type: edge.type, ownerId: edge.ownerId } },
+        );
+      }
       if (codeReference) {
         this.addActivity(
           board,
@@ -967,12 +1118,29 @@ export class DataManager {
     await this.mutateBoard(async (board) => {
       const taskTitle = board.tasks[taskId]?.title || "task";
       const user = await AuthProvider.getGitHubUser();
+
+      // Log the deleted task's OWN relations before removing it.
+      // (schema 3.0.0: "Y blocks X" is stored on X as `blocked-by -> Y`,
+      // so that it disappears with X and is only visible here;
+      // the reciprocal "X blocks Y" lives on Y and is scrubbed in the loop below.)
+      const ownRelations = board.tasks[taskId]?.relations || [];
+      for (const relation of ownRelations) {
+        const otherTitle = board.tasks[relation.targetTaskId]?.title || relation.targetTaskId;
+        this.addActivity(
+          board,
+          generateRelationActivityType(relation.type, "deleted"),
+          `{${taskTitle}} <-> {${otherTitle}}`,
+          user,
+          { taskId, targetTaskId: relation.targetTaskId, metadata: { type: relation.type } },
+        );
+      }
+
       this.addTombstone(board, "task", taskId, user);
       delete board.tasks[taskId];
-      // The deleted task's relations are now dangling:
-      // log each one as a relation deletion
-      // (the in-code mirror is cleaned up separately by the caller),
-      // then scrub it out of the other tasks' JSON.
+
+      // Dangling references on the OTHER (surviving) tasks:
+      // log each as a relation deletion and scrub it out of their JSON
+      // (the in-code mirror is cleaned up separately by the caller).
       Object.values(board.tasks).forEach((task) => {
         const relations = task.relations || [];
         for (const relation of relations) {
@@ -1102,33 +1270,45 @@ export class DataManager {
     type: LynvoTaskRelationType,
   ): Promise<void> {
     await this.mutateBoard(async (board) => {
-      const task = board.tasks[taskId];
-      if (!task || !board.tasks[targetTaskId] || taskId === targetTaskId) {return;}
+      // Canonicalize (schema 3.0.0):
+      // "blocks A->B" is stored on B as "blocked-by -> A";
+      // the other types are stored as-is on the source task.
+      // `taskId` is the source of the user's intent
+      // the stored edge may live on a different task (the canonical owner).
+      const { ownerId, storedType, targetId } = canonicalizeRelation(
+        taskId,
+        type,
+        targetTaskId,
+      );
+      const owner = board.tasks[ownerId];
+      const target = board.tasks[targetId];
+      if (!owner || !target || ownerId === targetId) {return;}
 
-      const relations = task.relations || [];
+      // Dedup the exact canonical edge on the owner.
+      const relations = owner.relations || [];
       const alreadyExists = relations.some(
         (relation) =>
-          relation.targetTaskId === targetTaskId && relation.type === type,
+          relation.targetTaskId === targetId && relation.type === storedType,
       );
       if (alreadyExists) {return;}
 
       const user = await AuthProvider.getGitHubUser();
       const relation: LynvoTaskRelation = {
         id: this.createId("rel"),
-        type,
-        targetTaskId,
+        type: storedType,
+        targetTaskId: targetId,
         createdAt: Date.now(),
       };
 
-      task.relations = [...relations, relation];
-      task.updatedAt = Date.now();
-      if (user) {task.lastModifiedBy = user;}
+      owner.relations = [...relations, relation];
+      owner.updatedAt = Date.now();
+      if (user) {owner.lastModifiedBy = user;}
       this.addActivity(
         board,
-        generateRelationActivityType(type, "added"),
-        `{${task.title}} <+> {${board.tasks[targetTaskId].title}}`,
+        generateRelationActivityType(storedType, "added"),
+        `{${owner.title}} <+> {${target.title}}`,
         user,
-        { taskId, targetTaskId, metadata: { type } },
+        { taskId: ownerId, targetTaskId: targetId, metadata: { type: storedType } },
       );
     });
   }

@@ -181,17 +181,18 @@ Anything else would be wrapped with quotes : “...” .
 | `checklist_deleted` | Checklist item removed from task |
 | `relation_added` | "related" relation created (legacy catch-all for relations), shown as `"task" <+> "task"` |
 | `relation_deleted` | "related" relation removed (legacy catch-all for relations), shown as `"task" <-> "task"` |
-| `relation_block_added` | "blocks" relation created, shown as `"task" <+> "task"` |
-| `relation_block_deleted` | "blocks" relation removed, shown as `"task" <-> "task"` |
-| `relation_blockedby_added` | "blocked-by" relation created, shown as `"task" <+> "task"` |
-| `relation_blockedby_deleted` | "blocked-by" relation removed, shown as `"task" <-> "task"` |
+| `relation_block_added` | **legacy** — a "blocks" relation created (pre-schema-3.0.0 logs), shown as `"task" <+> "task"` |
+| `relation_block_deleted` | **legacy** — a "blocks" relation removed (pre-schema-3.0.0 logs), shown as `"task" <-> "task"` |
+| `relation_blockedby_added` | a blocked-by edge added — logged for **both** the `blocks` and `blocked-by` types (they are the same edge, schema 3.0.0), shown as `"task" <+> "task"` |
+| `relation_blockedby_deleted` | a blocked-by edge removed — logged for **both** the `blocks` and `blocked-by` types, shown as `"task" <-> "task"` |
 | `relation_duplicates_added` | "duplicates" relation created, shown as `"task" <+> "task"` |
 | `relation_duplicates_deleted` | "duplicates" relation removed, shown as `"task" <-> "task"` |
 
-Note: the three `*_updated` types above are kept only for backward compatibility with existing activity logs, or at worse a default cases where the specific types cannot be specified;
-Any new activity should uses the specific `*_renamed` / `column_color_changed` types.
-Likewise, `relation_added` / `relation_deleted` are now specific to the "related" type (and kept for legacy "related" entries);
-The blocks / blocked-by / duplicates relation types have their own dedicated added/removed types.
+Note: the three `*_updated` types above are kept only for backward compatibility with existing activity logs, or at worst a default case where the specific type cannot be specified;
+any new activity should use the specific `*_renamed` / `column_color_changed` types.
+Likewise, `relation_added` / `relation_deleted` are specific to the "related" type (kept for legacy "related" entries).
+Since schema 3.0.0, `blocks` and `blocked-by` are the **same edge**, so both log `relation_blockedby_added` / `relation_blockedby_deleted`;
+`relation_block_added` / `relation_block_deleted` are kept only for pre-3.0.0 logs.
 The `type` value stored in JSON is never localized — only its UI badge label is.
 
 ### LynvoSyncMetadata
@@ -428,8 +429,8 @@ When VS Code commands are unavailable, follow these recipes exactly. Always read
 | Add checklist item | Append a `LynvoChecklistItem` to `checklist`, update task timestamps/actor, and add `checklist_added` activity. |
 | Update checklist item | Modify only `text` and/or `done`, update item and task timestamps/actor, and add `checklist_updated` activity. |
 | Delete checklist item | Remove the checklist item, update task timestamps/actor, and add `checklist_deleted` activity. |
-| Add relation | Add one directed relation to the source task only after confirming both tasks exist, source and target differ, and the same `targetTaskId` + `type` is not already present. Add the relation-specific activity: `relation_added` (related), `relation_block_added` (blocks), `relation_blockedby_added` (blocked-by), or `relation_duplicates_added` (duplicates). |
-| Delete relation | Remove the relation from the source task by relation id, update task timestamps/actor, and add the matching removed activity by the relation's `type`: `relation_deleted`, `relation_block_deleted`, `relation_blockedby_deleted`, or `relation_duplicates_deleted`. |
+| Add relation | Canonicalize first (schema 3.0.0): `blocks A→B` is stored **on B** as `blocked-by → A`; `blocked-by`/`related`/`duplicates` are stored on the source task as-is. Only store the edge if both tasks exist, they differ, the pair is not already linked in either direction, and the exact canonical edge is not already on the owner. Add the activity by the **stored** type: `relation_blockedby_added` (blocks *or* blocked-by), `relation_added` (related), or `relation_duplicates_added` (duplicates). |
+| Delete relation | Remove the stored relation from its **owner** task by relation id (for a derived `blocks` shown on A, the stored edge lives on the target B as `blocked-by → A`, so delete it from B), update task timestamps/actor, and add the matching removed activity by the stored `type`: `relation_blockedby_deleted`, `relation_deleted`, or `relation_duplicates_deleted`. |
 | Create column | Reuse an existing case-insensitive column title first. If creating, add a `col-*` entry to `columns.json` with deterministic `position` and add `column_created` activity. |
 | Create label | Reuse an existing case-insensitive label name first. If creating, add a `label-*` entry under `board.json.labels` and add `label_created` activity. |
 | Resolve conflict | Update the task field only when choosing or synthesizing a new value, set the conflict's `resolved` to `true`, update sync metadata to `conflict` if unresolved conflicts remain or `pending` if all are resolved. Do not invent an activity type for conflict resolution. |
@@ -449,7 +450,7 @@ When a task is created by promoting an in-code TODO comment (`lynvo.promoteTodo`
 The comment body (the lines after the title line) may contain plain description text, then checklist items, then relations — in that order:
 
 - **Checklist** — `[ ]` unchecked, `[x]` checked.
-- **Relations** — `[!]` blocked-by, `[&]` related, `[|]` blocks, `[=]` duplicates. The target is a task, written as `{Title}` (matched case-insensitively); a bare task id or another task's `lynvo-todo-…` marker is also accepted. On promotion each relation line is rewritten to `task-id {Title}` so the link stays reliable after renames.
+- **Relations** — `[!]` blocked-by, `[&]` related, `[|]` blocks, `[=]` duplicates. The target is a task, written as `{Title}` (matched case-insensitively); a bare task id or another task's `lynvo-todo-…` marker is also accepted. On promotion each relation line is rewritten to `task-id {Title}` so the link stays reliable after renames. Note: `[|]` (blocks) and `[!]` (blocked-by) denote the **same edge** — `[|] {B}` on task A means "A blocks B" and is stored as `blocked-by → A` **on B**; a task's comment shows its **full** relation set (own stored + derived `blocks`), so one edge can appear in two tasks' comments.
 
 Example (block comment):
 
@@ -515,22 +516,31 @@ code blocks with language hint
 
 ## Task Relations
 
-| Type | Meaning |
-|---|---|
-| `blocks` | This task prevents the target task from being done |
-| `blocked-by` | This task cannot proceed until the target task is done |
-| `related` | This task is connected to the target task (general association) |
-| `duplicates` | This task is a duplicate of the target task |
+| Type | Meaning | Stored as |
+|---|---|---|
+| `blocks` | This task prevents the target task from being done | **derived** — stored on the target as `blocked-by` |
+| `blocked-by` | This task cannot proceed until the target task is done | stored on this task as `blocked-by` |
+| `related` | This task is connected to the target task (general association) | stored on this task as `related` |
+| `duplicates` | This task is a duplicate of the target task | stored on this task as `duplicates` |
+
+### Canonical storage model (schema 3.0.0)
+
+`blocks` and `blocked-by` are two views of the **same edge**: "A blocks B" ⟺ "B is blocked-by A". To avoid storing the edge twice, **only `blocked-by` is persisted** — on the *blocked* task, pointing at the *blocker*.
+
+- **`blocked-by`** is the single stored form: the blocked task lists its blockers.
+- **`blocks`** is **derived** and never stored: a task's `blocks` list is every task whose stored `blocked-by` points back at it.
+- **`related`** and **`duplicates`** are stored as-is on the source task (they have no reciprocal form).
+- The UI still offers all four types. Adding `blocks A→B` writes `blocked-by B→A` **on B**; adding `blocked-by A→B` writes `blocked-by A→B` on A; `related`/`duplicates` write on the source. A relation is a **no-op** when the pair is already linked in either direction.
+- In-code comments render each task's **full** relation set (own stored + derived `blocks`), so a `blocks`/`blocked-by` edge shows on **both** tasks' comments (`[!]` on the blocked task, `[|]` on the blocker).
 
 ### Dependency Inference for Agents
 
 Before creating a task, scan existing tasks for matching titles, shared code references, parent planning tasks, prerequisites, blockers, and duplicated scope. Add relations proactively when they improve navigation or execution order.
 
-- Use `blocked-by` from the dependent task to the prerequisite task.
-- Use `blocks` only when the current task is clearly the prerequisite preventing the target task.
+- Use `blocked-by` from the dependent task to the prerequisite task (this is the **stored** form).
+- `blocks` is the same edge seen from the other side; expressing it as `blocks A→B` is normalized to `blocked-by B→A` on B. Do **not** store both directions — one edge is enough and avoids duplicated data.
 - Use `related` for shared context without ordering, including tasks from the same plan or touching the same subsystem.
 - Use `duplicates` for near-identical work; prefer updating the existing task instead of creating a duplicate when possible.
-- Do not create reciprocal dependency edges by default. A single directed relation is enough and avoids duplicated map lines.
 - Never relate a task to itself, and never add the same `targetTaskId` + `type` twice on one source task.
 
 ## Due Date States

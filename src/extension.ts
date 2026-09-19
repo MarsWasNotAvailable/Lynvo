@@ -220,6 +220,34 @@ async function promoteTodo(): Promise<void> {
      );
    }
 
+   // Refresh the in-code comments of every task involved in a
+   // relation edge that touches a just-created task.
+   // A promoted `[!]`/`[|]`/`[&]`/`[=]` line stores a canonical edge,
+   // but the referenced counterpart task's comment was not re-rendered
+   // when it was promoted — we do it now so that both halves of a
+   // `blocks`/`blocked-by` edge render, and the promoted task stays synchronized.
+   {
+     const finalBoard =
+       (await DataManager.loadBoard()) || { version: "", columns: {}, tasks: {} };
+     const todoIds = new Set(prepared.map((item) => item.todoId));
+     const createdIds = new Set<string>();
+     for (const task of Object.values(finalBoard.tasks)) {
+       if (task.codeReference?.todoId && todoIds.has(task.codeReference.todoId)) {
+         createdIds.add(task.id);
+       }
+     }
+     const toRefresh = new Set<string>(createdIds);
+     for (const task of Object.values(finalBoard.tasks)) {
+       for (const relation of task.relations || []) {
+         if (createdIds.has(task.id) || createdIds.has(relation.targetTaskId)) {
+           toRefresh.add(task.id);
+           toRefresh.add(relation.targetTaskId);
+         }
+       }
+     }
+     await LynvoPanel.refreshLinkedTaskRelations([...toRefresh]);
+   }
+
    const count = prepared.length;
    vscode.window.showInformationMessage(
      t("{0} TODO(s) promoted to Lynvo tasks.", count)
@@ -325,20 +353,34 @@ export function activate(context: vscode.ExtensionContext) {
     .then((pending) => LynvoPanel.postRemotePending(pending))
     .catch(() => {});
 
-  // Warn once (non-blocking) if the persisted board data uses
-  // a different MAJOR schema version than this extension.
-  // Must run BEFORE initializeBoard
-  // so the raw persisted version is still available to compare against.
-  DataManager.checkSchemaCompatibility().catch((err) =>
-    console.error("Lynvo Schema Check Error:", err),
-  );
-
-  DataManager.initializeBoard().catch((err) =>
-    console.error("Lynvo Init Error:", err),
-  );
-  DataManager.touchCurrentUser().catch((err) =>
-    console.error("Lynvo Presence Error:", err),
-  );
+  // Order matters:
+  // the migration prompt and the schema-compat check
+  // is decided based on the RAW persisted schema version,
+  // but any board Save will stamp that version up to this extension's (hiding an older major).
+  // So we capture the raw version FIRST, then run everything sequentially,
+  // and only start the presence ping (a board Save) after the board is initialized.
+  //  1. Capture the raw persisted schema version.
+  //  2. One-time older-schema migration (e.g. 2.x -> 3.x):
+  //     a modal prompt is shown only when the stored major is OLDER than this extension.
+  //     Accepting rewrites stored `blocks` into reciprocal `blocked-by`.
+  //  3. Non-blocking warning if the persisted major still differs.
+  //  4. Initialize the board (creates/stamps it as needed).
+  //  5. Presence ping (last, so it never stamps the version before step 1).
+  void (async () => {
+    const persistedSchema = await DataManager.readPersistedVersion().catch(() => null);
+    await DataManager.promptAndMigrateIfNeeded(persistedSchema).catch((err) =>
+      console.error("Lynvo Migration Prompt Error:", err),
+    );
+    await DataManager.checkSchemaCompatibility().catch((err) =>
+      console.error("Lynvo Schema Check Error:", err),
+    );
+    await DataManager.initializeBoard().catch((err) =>
+      console.error("Lynvo Init Error:", err),
+    );
+    await DataManager.touchCurrentUser().catch((err) =>
+      console.error("Lynvo Presence Error:", err),
+    );
+  })();
 
   SkillInstaller.installAll(context.extensionUri, context, { silent: true }).then(
     (result) => {
