@@ -14,6 +14,8 @@ import {
   parseTodoSelection,
   resolveRelationTarget,
   getTodoCommentEndIndex,
+  saveDocument,
+  withFileLock,
   TODO_KEYWORDS,
 } from "./providers/TodoTracker";
 import type { TodoBodyRelation, TodoCommentPayload } from "./providers/TodoTracker";
@@ -167,40 +169,42 @@ async function promoteTodo(): Promise<void> {
 
    // Rebuild each comment (title + marker + body) and replace the old span.
    // Process bottom-up so earlier line indices stay valid.
-   const edit = new vscode.WorkspaceEdit();
-   const ordered = prepared.slice().sort((a, b) => b.lineIndex - a.lineIndex);
-   for (const item of ordered) {
-     const startLine = editor.document.lineAt(item.lineIndex);
-     const endIndex = getTodoCommentEndIndex(docLines, item.lineIndex);
-     const endLine = editor.document.lineAt(endIndex);
-     const range = new vscode.Range(startLine.range.start, endLine.range.end);
-     const newLines = buildPromotedComment(
-       docLines,
-       item.lineIndex,
-       item.todoId,
-       {
-         title: item.payload.title,
-         description: item.payload.description,
-         checklist: item.payload.checklist,
-         relations: item.resolvedRelations,
-       },
-     );
-     edit.replace(editor.document.uri, range, newLines.join("\n"));
-   }
-   const applied = await vscode.workspace.applyEdit(edit);
+   // The write is serialized per file so it never interleaves with
+   // other Lynvo file edits (e.g. rapid successive promotes),
+   // avoiding lost updates and the "content of the file is newer" save conflict.
+   const applied = await withFileLock(filePath, async () => {
+     const edit = new vscode.WorkspaceEdit();
+     const ordered = prepared.slice().sort((a, b) => b.lineIndex - a.lineIndex);
+     for (const item of ordered) {
+       const startLine = editor.document.lineAt(item.lineIndex);
+       const endIndex = getTodoCommentEndIndex(docLines, item.lineIndex);
+       const endLine = editor.document.lineAt(endIndex);
+       const range = new vscode.Range(startLine.range.start, endLine.range.end);
+       const newLines = buildPromotedComment(
+         docLines,
+         item.lineIndex,
+         item.todoId,
+         {
+           title: item.payload.title,
+           description: item.payload.description,
+           checklist: item.payload.checklist,
+           relations: item.resolvedRelations,
+         },
+       );
+       edit.replace(editor.document.uri, range, newLines.join("\n"));
+     }
+     const ok = await vscode.workspace.applyEdit(edit);
+     if (!ok) {
+       return false;
+     }
+     // Guarded save : a hung/failed save must not block the promote flow.
+     await saveDocument(editor.document);
+     return true;
+   });
    if (!applied) {
      vscode.window.showErrorMessage(t("Lynvo could not update the file."));
      return;
    }
-   await new Promise<void>((resolve) => {
-     editor.document.save().then(
-       () => resolve(),
-       (error) => {
-         console.error("Lynvo: failed to save promoted TODO file", error);
-         resolve();
-       },
-     );
-   });
 
    // Create one task per promoted comment, linked by the marker token.
    for (const item of prepared) {

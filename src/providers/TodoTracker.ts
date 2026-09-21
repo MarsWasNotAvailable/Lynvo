@@ -167,19 +167,19 @@ export async function findMarkerLineIndex(filePath: string, todoId: string): Pro
 
 /** Remove the marker token from the line that contains it. Returns success. */
 export async function removeMarkerFromFile(filePath: string, todoId: string): Promise<boolean> {
-  let lines: string[];
-  try {
-    lines = (await readWorkspaceFileText(filePath)).split("\n");
-  } catch {
-    return false;
-  }
-  const index = lines.findIndex((line) => line.includes(todoId));
-  if (index === -1) {
-    return false;
-  }
-  lines[index] = removeMarker(lines[index], todoId);
-  await writeWorkspaceFileText(filePath, lines.join("\n"));
-  return true;
+  return withFileLock(filePath, async () => {
+    const text = await readFileTextLiveOrDisk(filePath);
+    if (!text) {
+      return false;
+    }
+    const lines = text.split("\n");
+    const index = lines.findIndex((line) => line.includes(todoId));
+    if (index === -1) {
+      return false;
+    }
+    lines[index] = removeMarker(lines[index], todoId);
+    return await writeFileTextLiveOrDisk(filePath, lines.join("\n"));
+  });
 }
 
 /**
@@ -191,43 +191,43 @@ export async function removeMarkerFromFile(filePath: string, todoId: string): Pr
  * Returns its success.
  */
 export async function removeTodoCommentFromFile(filePath: string, todoId: string): Promise<boolean> {
-  let lines: string[];
-  try {
-    lines = (await readWorkspaceFileText(filePath)).split("\n");
-  } catch {
-    return false;
-  }
-  const startIndex = lines.findIndex((line) => line.includes(todoId));
-  if (startIndex === -1) {
-    return false;
-  }
-  const { end: endIndex } = getCommentSpan(lines, startIndex);
-  // Remove the whole comment, not just the marker line:
-  // a continuation marker removes its enclosing block (opener -> closer),
-  // a line-comment marker removes the consecutive comment run it belongs to.
-  let removeStart = startIndex;
-  const enclosing = findEnclosingBlock(lines, startIndex);
-  if (enclosing) {
-    removeStart = enclosing.openerIndex;
-  } else {
-    const opener = lineCommentOpener(lines[startIndex].trimStart());
-    if (opener !== "") {
-      for (let k = startIndex - 1; k >= 0; k--) {
-        if ((lines[k] || "").trimStart().startsWith(opener)) {removeStart = k;}
-        else {break;}
+  return withFileLock(filePath, async () => {
+    const text = await readFileTextLiveOrDisk(filePath);
+    if (!text) {
+      return false;
+    }
+    const lines = text.split("\n");
+    const startIndex = lines.findIndex((line) => line.includes(todoId));
+    if (startIndex === -1) {
+      return false;
+    }
+    const { end: endIndex } = getCommentSpan(lines, startIndex);
+    // Remove the whole comment, not just the marker line:
+    // a continuation marker removes its enclosing block (opener -> closer),
+    // a line-comment marker removes the consecutive comment run it belongs to.
+    let removeStart = startIndex;
+    const enclosing = findEnclosingBlock(lines, startIndex);
+    if (enclosing) {
+      removeStart = enclosing.openerIndex;
+    } else {
+      const opener = lineCommentOpener(lines[startIndex].trimStart());
+      if (opener !== "") {
+        for (let k = startIndex - 1; k >= 0; k--) {
+          if ((lines[k] || "").trimStart().startsWith(opener)) {removeStart = k;}
+          else {break;}
+        }
       }
     }
-  }
-  let removeCount = endIndex - removeStart + 1;
-  // When the TODO comment is spaced out above and below,
-  // the removal of the TODO comment leaves two blank line.
-  // We attempt to remove the one below, if it exists.
-  if (endIndex + 1 < lines.length && lines[endIndex + 1].trim() === "") {
-    removeCount += 1;
-  }
-  lines.splice(removeStart, removeCount);
-  await writeWorkspaceFileText(filePath, lines.join("\n"));
-  return true;
+    let removeCount = endIndex - removeStart + 1;
+    // When the TODO comment is spaced out above and below,
+    // the removal of the TODO comment leaves two blank line.
+    // We attempt to remove the one below, if it exists.
+    if (endIndex + 1 < lines.length && lines[endIndex + 1].trim() === "") {
+      removeCount += 1;
+    }
+    lines.splice(removeStart, removeCount);
+    return await writeFileTextLiveOrDisk(filePath, lines.join("\n"));
+  });
 }
 
 /**
@@ -634,6 +634,24 @@ export function rewriteTodoComment(
   return [...lines.slice(0, start), ...newLines, ...lines.slice(end + 1)].join("\n");
 }
 
+/**
+ * Per-file serialization queue.
+ * Ensures read-modify-write cycles on the same file never interleave,
+ * which prevents lost updates (a stale read clobbering a newer write)
+ * and the "content of the file is newer" save conflict
+ * (a disk write racing a dirty editor buffer).
+ * Each task runs strictly after the previous one for that file.
+ * A rejecting task does not wedge the queue: the stored chain always resolves.
+ */
+const fileOperationQueues = new Map<string, Promise<void>>();
+
+export function withFileLock<T>(filePath: string, task: () => Promise<T>): Promise<T> {
+  const previous = fileOperationQueues.get(filePath) ?? Promise.resolve();
+  const result = previous.then(task);
+  fileOperationQueues.set(filePath, result.then(() => undefined, () => undefined));
+  return result;
+}
+
 /** Locate the open (possibly unsaved) document for a workspace-relative path. */
 function findOpenDocument(filePath: string): vscode.TextDocument | undefined {
   for (const doc of vscode.workspace.textDocuments) {
@@ -654,6 +672,78 @@ export async function readFileTextLiveOrDisk(filePath: string): Promise<string |
   }
 }
 
+/** How long to wait for a document save before giving up (avoids hanging the handler). */
+const SAVE_TIMEOUT_MS = 5000;
+
+/**
+ * Save a text document, guarded against a save that never settles:
+ *  - a timeout, so a hung save cannot block the extension handler forever;
+ *  - a catch, so a rejecting save is logged instead of crashing the caller.
+ * Returns `true` when the save completed, `false` when it timed out or failed.
+ * (A pending save remaining after the timeout is left to finish in the background,
+ * we simply stop waiting for it.)
+ */
+export async function saveDocument(
+  doc: vscode.TextDocument,
+  timeoutMs: number = SAVE_TIMEOUT_MS,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const saved = await Promise.race([
+      doc.save().then(
+        () => true,
+        (error: unknown) => {
+          console.error("Lynvo: save failed", error);
+          return false;
+        },
+      ),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+    if (!saved) {
+      console.warn("Lynvo: save timed out after", timeoutMs, "ms for", doc.uri.toString());
+    }
+    return saved;
+  } catch (error) {
+    console.error("Lynvo: save threw", error);
+    return false;
+  } finally {
+    if (timer) {clearTimeout(timer);}
+  }
+}
+
+/**
+ * Compute the single minimal region that differs between `oldText` and `newText`
+ * (longest common prefix + longest common suffix),
+ * so that only that region gets to be replaced.
+ * Returns null when the two are identical.
+ */
+function minimalReplace(
+  oldText: string,
+  newText: string,
+): { startOffset: number; endOffset: number; replacement: string } | null {
+  if (oldText === newText) {
+    return null;
+  }
+  const limit = Math.min(oldText.length, newText.length);
+  let prefix = 0;
+  while (prefix < limit && oldText[prefix] === newText[prefix]) {
+    prefix++;
+  }
+  let suffix = 0;
+  const maxSuffix = limit - prefix;
+  while ( suffix < maxSuffix && oldText[oldText.length - 1 - suffix]
+          === newText[newText.length - 1 - suffix]) {
+    suffix++;
+  }
+  return {
+    startOffset: prefix,
+    endOffset: oldText.length - suffix,
+    replacement: newText.slice(prefix, newText.length - suffix),
+  };
+}
+
 /**
  * Write text to a file, or to disk:
  * Applying to the open (unsaved) buffer when available,
@@ -669,15 +759,24 @@ export async function writeFileTextLiveOrDisk(filePath: string, text: string): P
   const doc = findOpenDocument(filePath);
   if (doc) {
     const wasCleanBeforeEdit = !doc.isDirty;
-    const fullRange = new vscode.Range(
-      new vscode.Position(0, 0),
-      doc.lineAt(Math.max(0, doc.lineCount - 1)).range.end,
-    );
+    const oldText = doc.getText();
+    const diff = minimalReplace(oldText, text);
+    // No-op: the buffer already holds the desired content.
+    if (!diff) {
+      return true;
+    }
+    // Targeted replace : thanks to minimalReplace above,
+    // only the changed region is rewritten,
+    // so that the user's undo stack records a minimal edit,
+    // and the time window for clobbering concurrent user edits is smaller.
     const edit = new vscode.WorkspaceEdit();
-    edit.replace(doc.uri, fullRange, text);
+    const start = doc.positionAt(diff.startOffset);
+    const end = doc.positionAt(diff.endOffset);
+    edit.replace(doc.uri, new vscode.Range(start, end), diff.replacement);
     const applied = await vscode.workspace.applyEdit(edit);
     if (applied && wasCleanBeforeEdit) {
-      await doc.save();
+      // Guarded save : a hung/failed save must not block the caller.
+      await saveDocument(doc);
     }
     return applied;
   }
@@ -705,11 +804,13 @@ export async function replaceTodoComment(
   todoId: string,
   payload: TodoCommentPayload,
 ): Promise<boolean> {
-  const text = await readFileTextLiveOrDisk(filePath);
-  if (!text) {return false;}
-  const next = rewriteTodoComment(text, todoId, payload);
-  if (!next) {return false;}
-  return await writeFileTextLiveOrDisk(filePath, next);
+  return withFileLock(filePath, async () => {
+    const text = await readFileTextLiveOrDisk(filePath);
+    if (!text) {return false;}
+    const next = rewriteTodoComment(text, todoId, payload);
+    if (!next) {return false;}
+    return await writeFileTextLiveOrDisk(filePath, next);
+  });
 }
 
 /**
@@ -729,13 +830,19 @@ export async function removeDanglingRelationFromFile(
   todoId: string,
   deletedTaskId: string,
 ): Promise<boolean> {
-  const current = await readTodoComment(filePath, todoId);
-  if (!current) {return false;}
-  const targetsDeleted = (relation: TodoBodyRelation): boolean =>
-    relation.target.trim().split(/\s+/)[0] === deletedTaskId;
-  const kept = current.relations.filter((relation) => !targetsDeleted(relation));
-  if (kept.length === current.relations.length) {return true;}
-  return await replaceTodoComment(filePath, todoId, { ...current, relations: kept });
+  return withFileLock(filePath, async () => {
+    const text = await readFileTextLiveOrDisk(filePath);
+    if (!text) {return false;}
+    const current = parseTodoComment(text, todoId);
+    if (!current) {return false;}
+    const targetsDeleted = (relation: TodoBodyRelation): boolean =>
+      relation.target.trim().split(/\s+/)[0] === deletedTaskId;
+    const kept = current.relations.filter((relation) => !targetsDeleted(relation));
+    if (kept.length === current.relations.length) {return true;}
+    const next = rewriteTodoComment(text, todoId, { ...current, relations: kept });
+    if (!next) {return false;}
+    return await writeFileTextLiveOrDisk(filePath, next);
+  });
 }
 
 /**
@@ -751,10 +858,16 @@ export async function removeTodoCommentRelationsFromFile(
   filePath: string,
   todoId: string,
 ): Promise<boolean> {
-  const current = await readTodoComment(filePath, todoId);
-  if (!current) {return false;}
-  if (current.relations.length === 0) {return true;}
-  return await replaceTodoComment(filePath, todoId, { ...current, relations: [] });
+  return withFileLock(filePath, async () => {
+    const text = await readFileTextLiveOrDisk(filePath);
+    if (!text) {return false;}
+    const current = parseTodoComment(text, todoId);
+    if (!current) {return false;}
+    if (current.relations.length === 0) {return true;}
+    const next = rewriteTodoComment(text, todoId, { ...current, relations: [] });
+    if (!next) {return false;}
+    return await writeFileTextLiveOrDisk(filePath, next);
+  });
 }
 
 /** Whether board -> code propagation is enabled (opt-out setting). */
