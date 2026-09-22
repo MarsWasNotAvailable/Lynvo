@@ -142,7 +142,11 @@ async function readWorkspaceFileText(filePath: string): Promise<string> {
   if (!uri) {
     throw new Error("No workspace folder is open.");
   }
-  const data = await vscode.workspace.fs.readFile(uri);
+  const data = await withTimeout(
+    vscode.workspace.fs.readFile(uri),
+    FS_TIMEOUT_MS,
+    `read ${filePath}`,
+  );
   return Buffer.from(data).toString("utf8");
 }
 
@@ -151,7 +155,11 @@ async function writeWorkspaceFileText(filePath: string, text: string): Promise<v
   if (!uri) {
     throw new Error("No workspace folder is open.");
   }
-  await vscode.workspace.fs.writeFile(uri, Buffer.from(text, "utf8"));
+  await withTimeout(
+    vscode.workspace.fs.writeFile(uri, Buffer.from(text, "utf8")),
+    FS_TIMEOUT_MS,
+    `write ${filePath}`,
+  );
 }
 
 /** Find the 0-based line index that contains the given marker token, or -1. */
@@ -675,6 +683,29 @@ export async function readFileTextLiveOrDisk(filePath: string): Promise<string |
 /** How long to wait for a document save before giving up (avoids hanging the handler). */
 const SAVE_TIMEOUT_MS = 5000;
 
+/** How long to wait for a disk read/write before giving up (avoids hanging the handler). */
+const FS_TIMEOUT_MS = 8000;
+
+/**
+ * Await `promiseLike` for at most `timeoutMs`,
+ * rejecting with a descriptive error on timeout (or on the underlying rejection).
+ * A timeout stops waiting on the operation without cancelling it.
+ * Used so no handler can hang indefinitely on an
+ * unbounded VS Code Thenable (a save, a disk read/write).
+ */
+function withTimeout<T>(promiseLike: PromiseLike<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    Promise.resolve(promiseLike).then(
+      (value) => {clearTimeout(timer); resolve(value);},
+      (error) => {clearTimeout(timer); reject(error);},
+    );
+  });
+}
+
 /**
  * Save a text document, guarded against a save that never settles:
  *  - a timeout, so a hung save cannot block the extension handler forever;
@@ -687,29 +718,12 @@ export async function saveDocument(
   doc: vscode.TextDocument,
   timeoutMs: number = SAVE_TIMEOUT_MS,
 ): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const saved = await Promise.race([
-      doc.save().then(
-        () => true,
-        (error: unknown) => {
-          console.error("Lynvo: save failed", error);
-          return false;
-        },
-      ),
-      new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), timeoutMs);
-      }),
-    ]);
-    if (!saved) {
-      console.warn("Lynvo: save timed out after", timeoutMs, "ms for", doc.uri.toString());
-    }
-    return saved;
+    const saved = await withTimeout(doc.save(), timeoutMs, `save ${doc.uri.toString()}`);
+    return saved === true;
   } catch (error) {
-    console.error("Lynvo: save threw", error);
+    console.error("Lynvo: save failed", error);
     return false;
-  } finally {
-    if (timer) {clearTimeout(timer);}
   }
 }
 
