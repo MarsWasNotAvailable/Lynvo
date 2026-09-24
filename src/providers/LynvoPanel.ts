@@ -427,6 +427,15 @@ export class LynvoPanel {
   ) {
     if (LynvoPanel.currentPanel) {
       LynvoPanel.currentPanel._panel.reveal(vscode.ViewColumn.One);
+      // Re-apply the active-language bundle on every reveal:
+      // the webview's runtime bundle can go stale
+      // (VS Code may re-navigate it to its original seed HTML)
+      // while the native sidebar keeps its refreshed labels.
+      // Pushing the current host bundle keeps the two in sync.
+      LynvoPanel.currentPanel._panel.webview.postMessage({
+        command: "setLanguage",
+        bundle: getWebviewBundle(),
+      });
       LynvoPanel.currentPanel._panel.webview.postMessage({
         command: "switchView",
         view: initialView,
@@ -574,7 +583,15 @@ export class LynvoPanel {
           case "requestData": {
             const board = await DataManager.loadBoard();
             const codeLinkStates = await computeCodeLinkStates(board);
-            webview.postMessage({ command: "loadData", data: board, codeLinkStates });
+            webview.postMessage({
+              command: "loadData",
+              data: board,
+              codeLinkStates,
+              // Include the current bundle so that a (re)initialized webview
+              // (e.g. after VS Code re-navigated it to its seed HTML)
+              // renders in the active language, not the stale seed.
+              bundle: getWebviewBundle(),
+            });
             return;
           }
           case "updateTaskStatus": {

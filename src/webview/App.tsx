@@ -236,7 +236,7 @@ const clampMapZoom = (value: number): number =>
 type CodeLinkState = "synced" | "diverged" | "broken";
 
 type WebviewInboundMessage =
-  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState> }
+  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; bundle?: l10nJsonFormat }
   | { command: "setCodeLinkStates"; states: Record<string, CodeLinkState> }
   | { command: "setRemotePending"; pending: boolean }
   | { command: "switchView"; view: LynvoView }
@@ -262,6 +262,7 @@ const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
       data: (value.data as LynvoBoard | null) || null,
       remotePending: value.remotePending === true,
       codeLinkStates: (value.codeLinkStates as Record<string, CodeLinkState> | undefined) || {},
+      bundle: isRecord(value.bundle) ? (value.bundle as l10nJsonFormat) : undefined,
     };
   }
   if (value.command === "setCodeLinkStates") {
@@ -1125,6 +1126,12 @@ export const App: React.FC = () => {
         setIsSyncing(false);
         setRemotePending(Boolean(message.remotePending));
         setCodeLinkStates(message.codeLinkStates || {});
+        // A (re)initialized webview applies the host's active-language bundle
+        // before its first render, so that it never shows a stale seed language.
+        if (message.bundle) {
+          setWebviewLanguage(message.bundle);
+          setLangVersion((version) => version + 1);
+        }
       }
 
       if (message.command === "setCodeLinkStates") {
