@@ -780,6 +780,19 @@ export class LynvoPanel {
             LynvoPanel.refreshDataAndScheduleSync();
             return;
           }
+          case "copyTaskId": {
+            const taskId = asString(message.taskId);
+            if (!taskId) {
+              return;
+            }
+            const title = asString(message.title);
+            // Copy the Lynvo reference form: `task-id {Title}`.
+            await vscode.env.clipboard.writeText(
+              title ? `${taskId} {${title}}` : taskId,
+            );
+            vscode.window.showInformationMessage(t("Task ID copied to clipboard."));
+            return;
+          }
           case "deleteTask": {
             const taskId = asString(message.taskId);
             if (!taskId) {

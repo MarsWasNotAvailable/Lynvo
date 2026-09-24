@@ -47,6 +47,7 @@ type WebviewOutboundMessage =
       relations?: Array<{ type: LynvoTaskRelationType; targetTaskId: string }>;
     }
   | { command: "deleteTask"; taskId: string }
+  | { command: "copyTaskId"; taskId: string; title: string }
   | { command: "addChecklistItem"; taskId: string; text: string }
   | { command: "updateChecklistItem"; taskId: string; itemId: string; text?: string; done?: boolean }
   | { command: "deleteChecklistItem"; taskId: string; itemId: string }
@@ -133,6 +134,25 @@ const SaveIcon = () => (
     aria-hidden="true"
   >
     <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+// Clipboard glyph for the "Copy Task ID" action.
+const ClipboardIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
   </svg>
 );
 
@@ -2105,6 +2125,16 @@ export const App: React.FC = () => {
                 {task.title}
               </h4>
               <div style={{ position: "absolute", top: "8px", right: "8px", display: "flex", gap: "2px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  style={iconButtonStyle}
+                  onClick={() => vscode.postMessage({ command: "copyTaskId", taskId: task.id, title: task.title })}
+                  title={t("Copy Task ID")}
+                  aria-label={t("Copy Task ID")}
+                >
+                  <ClipboardIcon />
+                </button>
                 {isCodeLinked && (
                   <button
                     type="button"

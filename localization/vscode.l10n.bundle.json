@@ -86,6 +86,8 @@
   "Cancel": "Cancel",
   "Save": "Save",
   "Edit": "Edit",
+  "Copy Task ID": "Copy Task ID",
+  "Task ID copied to clipboard.": "Task ID copied to clipboard.",
   "{0}/{1} checks": "{0}/{1} checks",
   "{0} links": "{0} links",
   "Open in editor": "Open in editor",

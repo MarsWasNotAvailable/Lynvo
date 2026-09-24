@@ -86,6 +86,8 @@
   "Cancel": "Annulla",
   "Save": "Salva",
   "Edit": "Modifica",
+  "Copy Task ID": "Copia ID del compito",
+  "Task ID copied to clipboard.": "ID del compito copiato negli appunti.",
   "{0}/{1} checks": "{0}/{1} verifiche",
   "{0} links": "{0} collegamenti",
   "Open in editor": "Apri nell'editor",
