@@ -618,10 +618,10 @@ const lynvoStyles = `
   }
 
   .lynvo-toolbar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-    align-items: center;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
     border-bottom: 1px solid var(--lynvo-border);
     padding-bottom: 10px;
   }
@@ -681,7 +681,7 @@ const lynvoStyles = `
   .lynvo-actions {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: 8px;
     flex-wrap: wrap;
   }
@@ -3378,8 +3378,8 @@ export const App: React.FC = () => {
           )}
         </div>
 
+        {(activeView === "board" || activeView === "table") && (
         <div className="lynvo-actions">
-          {(activeView === "board" || activeView === "table") && (
           <div className="lynvo-filters">
             <input className="lynvo-search" placeholder={t("Search tasks...")} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             <select value={activeFilterLabel} onChange={(e) => setActiveFilterLabel(e.target.value)} style={{ padding: "6px" }}>
@@ -3399,8 +3399,8 @@ export const App: React.FC = () => {
             </select>
             {isFiltering && <span style={{ fontSize: "10px", color: "var(--vscode-editorWarning-foreground)" }}>{t("Drag & Drop disabled")}</span>}
           </div>
-          )}
         </div>
+        )}
       </div>
 
       {boardData && activeView === "board" && (
