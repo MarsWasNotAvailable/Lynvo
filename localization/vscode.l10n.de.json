@@ -10,6 +10,8 @@
   "Selection already contains Lynvo-tracked TODO(s). Use 'Lynvo: Remove tracking' first.": "Die Auswahl enthält bereits von Lynvo verfolgte TODO(s). Verwende zuerst 'Lynvo: Remove tracking'.",
   "Lynvo could not update the file.": "Lynvo konnte die Datei nicht aktualisieren.",
   "{0} TODO(s) promoted to Lynvo tasks.": "{0} TODO(s) zu Lynvo-Aufgaben befördert.",
+  "Could not promote any TODO: {0}. A task can only reference tasks listed above it.": "Kein TODO konnte befördert werden: {0}. Eine Aufgabe kann nur Aufgaben verweisen, die darüber aufgeführt sind.",
+  "Promoted {0} of {1} TODO(s). Skipped reasons : {2}. A task can only reference tasks listed above it.": "{0} von {1} TODO(s) befördert. Nicht befördert: {2}. Eine Aufgabe kann nur Aufgaben verweisen, die darüber aufgeführt sind.",
   "Lynvo board not found. Open a project folder first.": "Lynvo-Board nicht gefunden. Öffne zuerst einen Projektordner.",
   "Task title": "Aufgabentitel",
   "Title cannot be empty.": "Der Titel darf nicht leer sein.",

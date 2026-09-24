@@ -923,10 +923,12 @@ export class DataManager {
     dueDate?: number,
     checklist: Array<{ text: string; done: boolean }> = [],
     relations: Array<{ type: LynvoTaskRelationType; targetTaskId: string }> = [],
-  ): Promise<void> {
+  ): Promise<string> {
+    let newTaskId = "";
     await this.mutateBoard(async (board) => {
       const user = await AuthProvider.getGitHubUser();
       const taskId = this.createId("task");
+      newTaskId = taskId;
 
       let status = targetColId;
       if (!status || !board.columns[status]) {
@@ -1033,6 +1035,7 @@ export class DataManager {
         );
       }
     });
+    return newTaskId;
   }
 
   public static async editTask(

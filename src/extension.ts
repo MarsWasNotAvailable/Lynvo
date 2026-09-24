@@ -125,30 +125,9 @@ async function promoteTodo(): Promise<void> {
      resolvedRelations: [],
    }));
 
-   // Resolve every relation target to a task.
-   // If any cannot be resolved, abort the whole promotion (no partial writes)
-   // so the user can fix the title and retry.
-   const unresolved: string[] = [];
-   for (const item of prepared) {
-     item.resolvedRelations = item.payload.relations.map((relation) => {
-       const target = resolveRelationTarget(board, relation.target);
-       if (!target) {
-         unresolved.push(relation.target);
-         return { type: relation.type, target: relation.target };
-       }
-       // The task id is the reliable link; the {Title} is cosmetic.
-       return { type: relation.type, target: `${target.taskId} {${target.title}}` };
-     });
-   }
-   if (unresolved.length > 0) {
-     vscode.window.showErrorMessage(
-       t("Could not resolve relation target(s): {0}. Fix the task title and promote again.", unresolved.join(", ")),
-     );
-     return;
-   }
-
    // Reject duplicate task titles (case-insensitive), both against existing
    // board tasks and against the other titles being created in this batch.
+   // Titles must stay unique so a later task can reference an earlier one by title.
    const seenTitles = new Set<string>(
      Object.values(board.tasks).map((task) => task.title.trim().toLowerCase()),
    );
@@ -167,14 +146,75 @@ async function promoteTodo(): Promise<void> {
      return;
    }
 
-   // Rebuild each comment (title + marker + body) and replace the old span.
+   // In-order pass: promote the selection of tasks from top to bottom
+   // so that a task may reference a task listed ABOVE it in the batch.
+   // We do not allow a task to reference one that is listed below it,
+   // in order to keep things simple and prevent circular dependency
+   // (a forward reference simply fails).
+   // Each resolvable task is created now (to learn its id)
+   // and registered by title; its marker is written in the batch below.
+   const registry = new Map<string, { taskId: string; title: string }>();
+   const resolveInBatch = (target: string): { taskId: string; title: string } | undefined => {
+     const text = target.trim();
+     const titleMatch = text.match(/\{(.+)\}/);
+     const titleText = (titleMatch ? titleMatch[1] : text).trim().toLowerCase();
+     return registry.get(titleText);
+   };
+   const created: PreparedTodo[] = [];
+   // Stores metadata about tasks skipped due to failing to resolve a target.
+   const skipped: Array<{ title: string; target: string }> = [];
+   for (const item of prepared) {
+     // Resolve each relation against existing board tasks, then this batch's earlier tasks.
+     let unresolvedTarget: string | undefined;
+     const resolvedRelations: TodoBodyRelation[] = [];
+     for (const relation of item.payload.relations) {
+       const target = resolveRelationTarget(board, relation.target) || resolveInBatch(relation.target);
+       if (!target) {
+         unresolvedTarget = relation.target;
+         break;
+       }
+       // The task id is the reliable link; the {Title} is cosmetic.
+       resolvedRelations.push({ type: relation.type, target: `${target.taskId} {${target.title}}` });
+     }
+     if (unresolvedTarget !== undefined) {
+       skipped.push({ title: item.payload.title, target: unresolvedTarget });
+       continue;
+     }
+     const newId = await DataManager.createTask(
+       item.payload.title,
+       item.payload.description,
+       undefined,
+       [],
+       { filePath, todoId: item.todoId },
+       "medium",
+       undefined,
+       item.payload.checklist,
+       resolvedRelations.map((relation) => ({
+         type: relation.type,
+         targetTaskId: relation.target.split(" ")[0],
+       })),
+     );
+     registry.set(item.payload.title.trim().toLowerCase(), { taskId: newId, title: item.payload.title });
+     item.resolvedRelations = resolvedRelations;
+     created.push(item);
+   }
+
+   if (created.length === 0) {
+     const details = skipped.map((entry) => `"${entry.title}" -> ${entry.target}`).join(", ");
+     vscode.window.showErrorMessage(
+       t("Could not promote any TODO: {0}. A task can only reference tasks listed above it.", details),
+     );
+     return;
+   }
+
+   // Rebuild each created comment (title + marker + body) and replace the old span.
    // Process bottom-up so earlier line indices stay valid.
    // The write is serialized per file so it never interleaves with
    // other Lynvo file edits (e.g. rapid successive promotes),
    // avoiding lost updates and the "content of the file is newer" save conflict.
    const applied = await withFileLock(filePath, async () => {
      const edit = new vscode.WorkspaceEdit();
-     const ordered = prepared.slice().sort((a, b) => b.lineIndex - a.lineIndex);
+     const ordered = created.slice().sort((a, b) => b.lineIndex - a.lineIndex);
      for (const item of ordered) {
        const startLine = editor.document.lineAt(item.lineIndex);
        const endIndex = getTodoCommentEndIndex(docLines, item.lineIndex);
@@ -206,34 +246,16 @@ async function promoteTodo(): Promise<void> {
      return;
    }
 
-   // Create one task per promoted comment, linked by the marker token.
-   for (const item of prepared) {
-     await DataManager.createTask(
-       item.payload.title,
-       item.payload.description,
-       undefined,
-       [],
-       { filePath, todoId: item.todoId },
-       "medium",
-       undefined,
-       item.payload.checklist,
-       item.resolvedRelations.map((relation) => ({
-         type: relation.type,
-         targetTaskId: relation.target.split(" ")[0],
-       })),
-     );
-   }
-
    // Refresh the in-code comments of every task involved in a
    // relation edge that touches a just-created task.
    // A promoted `[!]`/`[|]`/`[&]`/`[=]` line stores a canonical edge,
    // but the referenced counterpart task's comment was not re-rendered
-   // when it was promoted — we do it now so that both halves of a
+   // when it was promoted - we do it now so that both halves of a
    // `blocks`/`blocked-by` edge render, and the promoted task stays synchronized.
    {
      const finalBoard =
        (await DataManager.loadBoard()) || { version: "", columns: {}, tasks: {} };
-     const todoIds = new Set(prepared.map((item) => item.todoId));
+     const todoIds = new Set(created.map((item) => item.todoId));
      const createdIds = new Set<string>();
      for (const task of Object.values(finalBoard.tasks)) {
        if (task.codeReference?.todoId && todoIds.has(task.codeReference.todoId)) {
@@ -252,10 +274,15 @@ async function promoteTodo(): Promise<void> {
      await LynvoPanel.refreshLinkedTaskRelations([...toRefresh]);
    }
 
-   const count = prepared.length;
-   vscode.window.showInformationMessage(
-     t("{0} TODO(s) promoted to Lynvo tasks.", count)
-   );
+   const total = prepared.length;
+   if (created.length === total) {
+     vscode.window.showInformationMessage(t("{0} TODO(s) promoted to Lynvo tasks.", created.length));
+   } else {
+     const details = skipped.map((entry) => `"${entry.title}" -> ${entry.target}`).join(", ");
+     vscode.window.showWarningMessage(
+       t("Promoted {0} of {1} TODO(s). Skipped reasons : {2}. A task can only reference tasks listed above it.", created.length, total, details),
+     );
+   }
    LynvoPanel.refreshData();
    GitService.scheduleBoardSync();
 }
