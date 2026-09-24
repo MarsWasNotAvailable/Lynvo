@@ -347,7 +347,7 @@ async function syncLinkedTaskToCode(
   const checklist =
     override?.checklist ??
     (task.checklist || []).map((entry) => ({ text: entry.text, done: entry.done }));
-  const relations = override?.relations ?? (task.relations || []);
+  const relations = override?.relations ?? fullRelationLines(board, taskId);
   const payload: TodoCommentPayload = {
     title: override?.title ?? task.title,
     description: override?.description ?? task.description,
@@ -650,9 +650,11 @@ export class LynvoPanel {
             const effectiveChecklist: IncomingChecklistItem[] = Array.isArray(message.checklist)
               ? asChecklistItems(message.checklist)
               : (task.checklist || []).map((entry) => ({ id: entry.id, text: entry.text, done: entry.done }));
+            // When the webview omits relations, treat them as unchanged:
+            // the task's FULL set (own + derived `blocks`), not just the stored own ones.
             const effectiveRelations: BoardRelation[] = Array.isArray(message.relations)
               ? asRelationTargets(message.relations)
-              : (task.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId }));
+              : fullRelationLines(board, taskId);
 
             const fieldsHasChanged =
               task.title !== title ||
@@ -928,7 +930,7 @@ export class LynvoPanel {
               ];
               const ok = await syncLinkedTaskToCode(board, taskId, {
                 checklist,
-                relations: (task.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId })),
+                relations: fullRelationLines(board, taskId),
               });
               if (!ok) {
                 vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
@@ -960,7 +962,7 @@ export class LynvoPanel {
               );
               const ok = await syncLinkedTaskToCode(board, taskId, {
                 checklist,
-                relations: (task.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId })),
+                relations: fullRelationLines(board, taskId),
               });
               if (!ok) {
                 vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
@@ -988,7 +990,7 @@ export class LynvoPanel {
                 .map((entry) => ({ text: entry.text, done: entry.done }));
               const ok = await syncLinkedTaskToCode(board, taskId, {
                 checklist,
-                relations: (task.relations || []).map((relation) => ({ type: relation.type, targetTaskId: relation.targetTaskId })),
+                relations: fullRelationLines(board, taskId),
               });
               if (!ok) {
                 vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
