@@ -183,6 +183,62 @@ const isSafeWorkspaceRelativePath = (filePath: string): boolean =>
   !filePath.includes("..") &&
   !/^[a-zA-Z]:[\\/]/.test(filePath);
 
+/**
+ * Delete one task and clean up any in-code TODO references that it owns
+ * or that some other tasks hold to it (references).
+ * For consistent behavior, this function is reused by
+ * the single-task delete and the "remove all tasks in a column" action
+ * A failing in-code write never aborts the deletion (it is surfaced as a warning).
+ */
+async function deleteTaskWithCodeCleanup(taskId: string): Promise<void> {
+  const board = await DataManager.loadBoard();
+  const task = board?.tasks[taskId];
+  if (!task) {return;}
+  const todoId = task.codeReference?.todoId;
+  const filePath = task.codeReference?.filePath;
+  if (todoId && filePath && isSafeWorkspaceRelativePath(filePath)) {
+    // When deleting a linked task, we essentially try to unhook the code;
+    // there are some bits we intentionally leave behind - but not broken relations.
+    // The deleted task's own comment may still declare relations (e.g. `[|] task`);
+    // those edges no longer exist in the board, so we scrub them before demoting
+    // (the marker is still present here, which is what locates the comment).
+    await removeTodoCommentRelationsFromFile(filePath, todoId);
+    // Demote: strip the marker token but keep the comment body itself.
+    await removeMarkerFromFile(filePath, todoId);
+  }
+  // Best-effort cleanup: remove dangling in-code relations in OTHER tasks
+  // that pointed at the deleted task (e.g. `[!] task-gone {Gone}`).
+  // A failing write must never abort the deletion,
+  // so we collect the failed files and surface a single warning afterwards.
+  const otherLinked = Object.values(board.tasks).filter(
+    (other) =>
+      other.id !== taskId &&
+      Boolean(other.codeReference?.todoId && other.codeReference?.filePath) &&
+      isSafeWorkspaceRelativePath(other.codeReference!.filePath!),
+  );
+  const seen = new Set<string>();
+  const failedFiles: string[] = [];
+  for (const other of otherLinked) {
+    const linkedPath = other.codeReference!.filePath!;
+    const pairKey = `${linkedPath}::${other.codeReference!.todoId}`;
+    // NOTE : `otherLinked` already excludes the deleted task, and every task has a unique marker,
+    // so a task living in the SAME file as the deleted one is still processed;
+    // its comment is located by its own marker, independent of the deleted task's.
+    // Do NOT skip by file, otherwise a sibling task's dangling relation line would survive.
+    if (seen.has(pairKey)) {continue;}
+    seen.add(pairKey);
+    if (!await removeDanglingRelationFromFile(linkedPath, other.codeReference!.todoId!, taskId)) {
+      failedFiles.push(linkedPath);
+    }
+  }
+  if (failedFiles.length > 0) {
+    vscode.window.showWarningMessage(
+      t("Some in-code relations to the deleted task could not be cleaned: {0}", failedFiles.join(", ")),
+    );
+  }
+  await DataManager.deleteTask(taskId);
+}
+
 /** Board-side relation (type + target task id). */
 type BoardRelation = { type: LynvoTaskRelationType; targetTaskId: string };
 
@@ -814,47 +870,7 @@ export class LynvoPanel {
               deleteLabel,
             );
             if (confirmTask === deleteLabel) {
-              if (todoId && filePath && isSafeWorkspaceRelativePath(filePath)) {
-                // When deleting a linked task, we essentially try to unhook the code;
-                // there are some bits we intentionally leave behind - but not broken relations.
-                // The deleted task's own comment may still declare relations (e.g. `[|] task`);
-                // those edges no longer exist in the board, so we scrub them before demoting
-                // (the marker is still present here, which is what locates the comment).
-                await removeTodoCommentRelationsFromFile(filePath, todoId);
-                // Demote: strip the marker token but keep the comment body itself.
-                await removeMarkerFromFile(filePath, todoId);
-              }
-              // Best-effort cleanup: remove dangling in-code relations in OTHER tasks
-              // that pointed at the deleted task (e.g. `[!] task-gone {Gone}`).
-              // A failing write must never abort the deletion,
-              // so we collect the failed files and surface a single warning afterwards.
-              const otherLinked = Object.values(board?.tasks || {}).filter(
-                (other) =>
-                  other.id !== taskId &&
-                  Boolean(other.codeReference?.todoId && other.codeReference?.filePath) &&
-                  isSafeWorkspaceRelativePath(other.codeReference!.filePath!),
-              );
-              const seen = new Set<string>();
-              const failedFiles: string[] = [];
-              for (const other of otherLinked) {
-                const linkedPath = other.codeReference!.filePath!;
-                const pairKey = `${linkedPath}::${other.codeReference!.todoId}`;
-                // NOTE : `otherLinked` already excludes the deleted task, and every task has a unique marker,
-                // so a task living in the SAME file as the deleted one is still processed;
-                // its comment is located by its own marker, independent of the deleted task's.
-                // Do NOT skip by file, otherwise a sibling task's dangling relation line would survive.
-                if (seen.has(pairKey)) {continue;}
-                seen.add(pairKey);
-                if (!await removeDanglingRelationFromFile(linkedPath, other.codeReference!.todoId!, taskId)) {
-                  failedFiles.push(linkedPath);
-                }
-              }
-              if (failedFiles.length > 0) {
-                vscode.window.showWarningMessage(
-                  t("Some in-code relations to the deleted task could not be cleaned: {0}", failedFiles.join(", ")),
-                );
-              }
-              await DataManager.deleteTask(taskId);
+              await deleteTaskWithCodeCleanup(taskId);
               LynvoPanel.refreshDataAndScheduleSync();
             }
             return;
@@ -900,6 +916,40 @@ export class LynvoPanel {
               await DataManager.deleteColumn(colId);
               LynvoPanel.refreshDataAndScheduleSync();
             }
+            return;
+          }
+          case "clearColumnTasks": {
+            const colId = asString(message.colId);
+            if (!colId) {
+              return;
+            }
+            const board = await DataManager.loadBoard();
+            if (!board) {
+              return;
+            }
+            const tasksInColumn = Object.values(board.tasks).filter(
+              (task) => task.status === colId,
+            );
+            if (tasksInColumn.length === 0) {
+              vscode.window.showInformationMessage(t("This column has no tasks to remove."));
+              return;
+            }
+            const removeLabel = t("Remove all tasks");
+            const confirmClear = await vscode.window.showWarningMessage(
+              t("Remove all {0} task(s) in this column? The column itself will be kept.", tasksInColumn.length),
+              { modal: true },
+              removeLabel,
+            );
+            if (confirmClear !== removeLabel) {
+              return;
+            }
+            for (const task of tasksInColumn) {
+              await deleteTaskWithCodeCleanup(task.id);
+            }
+            vscode.window.showInformationMessage(
+              t("Removed {0} task(s) from the column.", tasksInColumn.length),
+            );
+            LynvoPanel.refreshDataAndScheduleSync();
             return;
           }
           case "reorderColumns": {

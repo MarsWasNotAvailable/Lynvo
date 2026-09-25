@@ -61,6 +61,7 @@ type WebviewOutboundMessage =
   | { command: "createColumn"; title: string; color: string }
   | { command: "editColumn"; colId: string; title: string; color: string }
   | { command: "deleteColumn"; colId: string }
+  | { command: "clearColumnTasks"; colId: string }
   | { command: "reorderColumns"; updates: Array<{ id: string; position: number }> }
   | { command: "createLabel"; name: string; color: string }
   | { command: "updateLabel"; labelId: string; name: string; color: string }
@@ -171,6 +172,27 @@ const PlusIcon = () => (
   >
     <line x1="12" y1="5" x2="12" y2="19" />
     <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+
+// Broom glyph for the "Remove all tasks" (clear column) action.
+const BroomIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M20 3L12 11" />
+    <path d="M12 11L6 13L9 21L15 19L14 12Z" />
+    <path d="M9 15L8 19" />
+    <path d="M12 14L11 19" />
   </svg>
 );
 
@@ -3484,8 +3506,10 @@ export const App: React.FC = () => {
 	                      <span>{col.title}</span>
 	                      <span className="lynvo-count">{columnTasks.length}</span>
 	                    </h3>
-	                    <div style={{ display: "flex", gap: "5px" }}>
+	                    <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
                       <button type="button" className="icon-btn" onClick={() => openAddTaskForm(col.id)} title={t("Add task")} aria-label={t("Add task")} style={iconButtonStyle}><PlusIcon /></button>
+                      <button type="button" className="icon-btn" onClick={() => vscode.postMessage({ command: "clearColumnTasks", colId: col.id })} title={t("Remove all tasks")} aria-label={t("Remove all tasks")} style={iconButtonStyle}><BroomIcon /></button>
+                      <span aria-hidden="true" style={{ width: "1px", height: "18px", margin: "0 3px", backgroundColor: "var(--lynvo-border, var(--vscode-panel-border, #3a3a3a))" }} />
                       <button className="icon-btn" onClick={() => startEditingColumn(col)} title={t("Edit")} aria-label={t("Edit")} style={iconButtonStyle}><EditIcon /></button>
                       <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteColumn", colId: col.id })} title={t("Delete")} aria-label={t("Delete")} style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
                     </div>
