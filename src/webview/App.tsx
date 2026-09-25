@@ -1130,11 +1130,24 @@ export const App: React.FC = () => {
   const mapDragRef = useRef<MapDragState | null>(null);
   const mapPanRef = useRef<MapPanState | null>(null);
   const suppressMapClickRef = useRef<string | null>(null);
+  // The opened "add task" form, the ref is used to make its host column scroll to it when opened.
+  const addTaskFormRef = useRef<HTMLDivElement | null>(null);
 
   const isFiltering =
     searchTerm.trim().length > 0 ||
     activeFilterLabel !== "" ||
     activePriorityFilter !== "";
+
+  // When the "add task" form opens, ask its column to scroll to the bottom
+  // so that the form (rendered at the end of the column) is immediately visible.
+  useEffect(() => {
+    if (addingTaskColId && addTaskFormRef.current) {
+      const column = addTaskFormRef.current.closest(".lynvo-column");
+      if (column) {
+        column.scrollTo({ top: column.scrollHeight, behavior: "smooth" });
+      }
+    }
+  }, [addingTaskColId]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -3472,6 +3485,7 @@ export const App: React.FC = () => {
 	                      <span className="lynvo-count">{columnTasks.length}</span>
 	                    </h3>
 	                    <div style={{ display: "flex", gap: "5px" }}>
+                      <button type="button" className="icon-btn" onClick={() => openAddTaskForm(col.id)} title={t("Add task")} aria-label={t("Add task")} style={iconButtonStyle}><PlusIcon /></button>
                       <button className="icon-btn" onClick={() => startEditingColumn(col)} title={t("Edit")} aria-label={t("Edit")} style={iconButtonStyle}><EditIcon /></button>
                       <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteColumn", colId: col.id })} title={t("Delete")} aria-label={t("Delete")} style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
                     </div>
@@ -3517,8 +3531,10 @@ export const App: React.FC = () => {
                   </div>
                 )}
 
-                {addingTaskColId === col.id ? (
-                  <div style={{ marginBottom: "15px", padding: "10px", backgroundColor: "var(--vscode-editor-background)", borderRadius: "6px", border: "1px solid var(--vscode-focusBorder)" }}>
+                {columnTasks.map(renderTaskCard)}
+
+                {addingTaskColId === col.id && (
+                  <div ref={addTaskFormRef} style={{ marginTop: "15px", padding: "10px", backgroundColor: "var(--vscode-editor-background)", borderRadius: "6px", border: "1px solid var(--vscode-focusBorder)" }}>
                     <input autoFocus placeholder={t("Task title...")} value={newTaskTitle} onChange={(e) => { setNewTaskTitle(e.target.value); if (newTaskError) { setNewTaskError(""); } }} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
                     {newTaskError && (
                       <div style={{ color: "var(--vscode-inputValidation-errorForeground, #f48771)", fontSize: "11px", marginBottom: "8px" }}>{newTaskError}</div>
@@ -3538,11 +3554,7 @@ export const App: React.FC = () => {
                       <button onClick={submitNewTask} style={{ flex: 1, backgroundColor: "var(--vscode-button-background)", color: "white", border: "none" }}>{t("Save")}</button>
                     </div>
                   </div>
-                ) : (
-                  !isFiltering && <button onClick={() => openAddTaskForm(col.id)} style={{ width: "100%", padding: "6px", marginBottom: "15px", background: "transparent", border: "1px dashed var(--vscode-widget-border)", color: "var(--vscode-foreground)", cursor: "pointer", borderRadius: "4px" }}>{t("+ Add Task here")}</button>
                 )}
-
-                {columnTasks.map(renderTaskCard)}
               </div>
             );
           })}
