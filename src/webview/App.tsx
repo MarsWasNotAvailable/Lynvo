@@ -818,6 +818,7 @@ const lynvoStyles = `
     place-items: center;
     font-size: 11px;
     font-weight: 700;
+    cursor: pointer;
   }
 
   .icon-btn.delete:hover {
@@ -1154,6 +1155,9 @@ export const App: React.FC = () => {
   const suppressMapClickRef = useRef<string | null>(null);
   // The opened "add task" form, the ref is used to make its host column scroll to it when opened.
   const addTaskFormRef = useRef<HTMLDivElement | null>(null);
+  // The column currently being dragged to reorder (drag handle = column header).
+  const draggedColumnRef = useRef<string | null>(null);
+  const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
 
   const isFiltering =
     searchTerm.trim().length > 0 ||
@@ -1867,6 +1871,44 @@ export const App: React.FC = () => {
     cols[swapIndex].position = currentPosition;
 
     const updates = cols.map((c) => ({ id: c.id, position: c.position }));
+    setBoardData({
+      ...boardData,
+      columns: Object.fromEntries(cols.map((c) => [c.id, c])),
+    });
+    vscode.postMessage({ command: "reorderColumns", updates });
+  };
+
+  // --- Column drag-and-drop (drag handle is the column header) ---
+  const handleColumnDragStart = (e: React.DragEvent, colId: string) => {
+    if (isFiltering) {
+      e.preventDefault();
+      return;
+    }
+    draggedColumnRef.current = colId;
+    e.dataTransfer.setData("text/plain", `lynvo-column:${colId}`);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleColumnDragEnd = () => {
+    draggedColumnRef.current = null;
+    setDragOverColumnId(null);
+  };
+
+  const handleColumnDrop = (targetColId: string) => {
+    const sourceColId = draggedColumnRef.current;
+    draggedColumnRef.current = null;
+    setDragOverColumnId(null);
+    if (!sourceColId || !boardData || sourceColId === targetColId) {return;}
+
+    const cols = [...sortedColumns];
+    const fromIdx = cols.findIndex((c) => c.id === sourceColId);
+    const toIdx = cols.findIndex((c) => c.id === targetColId);
+    if (fromIdx < 0 || toIdx < 0) {return;}
+
+    const [moved] = cols.splice(fromIdx, 1);
+    cols.splice(toIdx, 0, moved);
+
+    const updates = cols.map((c, idx) => ({ id: c.id, position: idx }));
     setBoardData({
       ...boardData,
       columns: Object.fromEntries(cols.map((c) => [c.id, c])),
@@ -3481,13 +3523,26 @@ export const App: React.FC = () => {
             return (
               <div
                 key={col.id}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => handleDrop(e, col.id)}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (draggedColumnRef.current) {
+                    setDragOverColumnId(col.id);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (draggedColumnRef.current) {
+                    handleColumnDrop(col.id);
+                  } else {
+                    handleDrop(e, col.id);
+                  }
+                }}
                 onDragEnter={() => {
                   dragOverTaskRef.current = null;
                 }}
 	                style={{
 	                  borderTop: `4px solid ${col.color}`,
+	                  ...(dragOverColumnId === col.id && draggedColumnRef.current ? { boxShadow: "0 0 0 2px var(--vscode-focusBorder)" } : {}),
 	                }}
 	                className="lynvo-column"
 	              >
@@ -3501,7 +3556,7 @@ export const App: React.FC = () => {
                     <button className="icon-btn" onClick={() => setEditingColId(null)}>X</button>
                   </div>
                 ) : (
-	                  <div className="lynvo-column-header">
+	                  <div className="lynvo-column-header" draggable={!isFiltering} style={{ cursor: "grab" }} onDragStart={(e) => { if ((e.target as HTMLElement).closest("button, input, select, a")) { e.preventDefault(); return; } handleColumnDragStart(e, col.id); }} onDragEnd={handleColumnDragEnd}>
 	                    <h3 className="lynvo-column-title">
 	                      <span>{col.title}</span>
 	                      <span className="lynvo-count">{columnTasks.length}</span>
