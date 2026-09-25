@@ -196,6 +196,26 @@ const BroomIcon = () => (
   </svg>
 );
 
+// "Add column" glyph: a plus inside a square open at the top (like a U).
+const AddColumnIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="32"
+    height="32"
+    viewBox="0 0 32 32"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M2 8V30H30V8" />
+    <path d="M16 24V8" />
+    <path d="M8 16H24" />
+  </svg>
+);
+
 const SortIcon = ({ direction }: { direction: "asc" | "desc" }) => {
   const ascending = direction === "asc";
   return (
@@ -723,7 +743,7 @@ const lynvoStyles = `
   .lynvo-actions {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: space-between;
     gap: 8px;
     flex-wrap: wrap;
   }
@@ -1051,7 +1071,7 @@ const lynvoStyles = `
     }
 
     .lynvo-actions {
-      justify-content: flex-start;
+      justify-content: space-between;
     }
 
     .lynvo-search {
@@ -1157,6 +1177,10 @@ export const App: React.FC = () => {
   const addTaskFormRef = useRef<HTMLDivElement | null>(null);
   // The column currently being dragged to reorder (drag handle = column header).
   const draggedColumnRef = useRef<string | null>(null);
+  // The "create column" form, the ref is used to auto-scroll it into view when opened.
+  const createColumnFormRef = useRef<HTMLDivElement | null>(null);
+  // Flag: after a column is created, scroll the board to reveal it.
+  const scrollNewColumnRef = useRef(false);
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
 
   const isFiltering =
@@ -1174,6 +1198,24 @@ export const App: React.FC = () => {
       }
     }
   }, [addingTaskColId]);
+
+  // When the "create column" form opens, scroll the board horizontally so it is visible.
+  useEffect(() => {
+    if (isAddingColumn && createColumnFormRef.current) {
+      createColumnFormRef.current.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "end" });
+    }
+  }, [isAddingColumn]);
+
+  // After a new column is added to the board data, scroll the board to reveal it.
+  useEffect(() => {
+    if (scrollNewColumnRef.current && boardData) {
+      scrollNewColumnRef.current = false;
+      const board = document.querySelector(".lynvo-board");
+      if (board) {
+        board.scrollTo({ left: board.scrollWidth, behavior: "smooth" });
+      }
+    }
+  }, [boardData]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -1830,6 +1872,7 @@ export const App: React.FC = () => {
   const submitNewColumn = () => {
     if (!newColTitle.trim()) {return;}
 
+    scrollNewColumnRef.current = true;
     vscode.postMessage({
       command: "createColumn",
       title: newColTitle.trim(),
@@ -3506,6 +3549,25 @@ export const App: React.FC = () => {
             </select>
             {isFiltering && <span style={{ fontSize: "10px", color: "var(--vscode-editorWarning-foreground)" }}>{t("Drag & Drop disabled")}</span>}
           </div>
+          {activeView === "board" && (
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => setIsAddingColumn((v) => !v)}
+              title={t("Add column")}
+              aria-label={t("Add column")}
+              style={{
+                ...iconButtonStyle,
+                width: "32px",
+                height: "32px",
+                ...(isAddingColumn
+                  ? { background: "var(--vscode-button-background)", color: "var(--vscode-button-foreground)" }
+                  : {}),
+              }}
+            >
+              <AddColumnIcon />
+            </button>
+          )}
         </div>
         )}
       </div>
@@ -3638,22 +3700,20 @@ export const App: React.FC = () => {
             );
           })}
 
-          <div style={{ flex: "0 0 250px" }}>
-            {isAddingColumn ? (
-              <div style={{ backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "15px", borderRadius: "8px" }}>
+          {isAddingColumn && (
+            <div style={{ flex: "0 0 240px", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
+              <div ref={createColumnFormRef} style={{ width: "100%", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "12px", borderRadius: "8px" }}>
                 <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
                   <input type="color" value={newColColor} onChange={(e) => setNewColColor(e.target.value)} />
-                  <input autoFocus placeholder={t("Column Name")} value={newColTitle} onChange={(e) => setNewColTitle(e.target.value)} style={{ flex: 1, padding: "4px" }} />
+                  <input autoFocus placeholder={t("Column Name")} value={newColTitle} onChange={(e) => setNewColTitle(e.target.value)} style={{ flex: 1, padding: "4px", minWidth: 0 }} />
                 </div>
                 <div style={{ display: "flex", gap: "5px" }}>
                   <button onClick={() => setIsAddingColumn(false)} style={{ flex: 1 }}>{t("Cancel")}</button>
                   <button onClick={submitNewColumn} style={{ flex: 1, backgroundColor: "var(--vscode-button-background)", color: "white", border: "none" }}>{t("Create")}</button>
                 </div>
               </div>
-            ) : (
-              <button onClick={() => setIsAddingColumn(true)} style={{ width: "100%", padding: "15px", background: "var(--vscode-button-secondaryBackground)", color: "var(--vscode-button-secondaryForeground)", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" }}>{t("+ Add another column")}</button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
