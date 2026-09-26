@@ -7,6 +7,7 @@ import {
   LynvoChecklistItem,
   LynvoColumn,
   LynvoConflict,
+  LynvoIdentity,
   LynvoLabel,
   LynvoPresenceUser,
   LynvoSyncMetadata,
@@ -123,6 +124,7 @@ export class DataManager {
         feat: { id: "feat", name: "Feature", color: "#a371f7" },
       },
       users: {},
+      identities: {},
       sync: this.getDefaultSyncMetadata(),
       tombstones: {},
       conflicts: {},
@@ -159,6 +161,7 @@ export class DataManager {
       tasks: board.tasks || {},
       labels: board.labels || defaults.labels,
       users: board.users || {},
+      identities: board.identities || {},
       activity: board.activity || {},
       sync: {
         ...this.getDefaultSyncMetadata(),
@@ -344,6 +347,7 @@ export class DataManager {
     const boardUri = this.joinModularPath("board.json");
     const columnsUri = this.joinModularPath("columns.json");
     const usersUri = this.joinModularPath("users.json");
+    const identitiesUri = this.joinModularPath("identities.json");
     const tasksUri = this.joinModularPath("tasks");
     const activityUri = this.joinModularPath("activity");
     const syncUri = this.joinModularPath("metadata", "sync.json");
@@ -353,6 +357,7 @@ export class DataManager {
       !boardUri ||
       !columnsUri ||
       !usersUri ||
+      !identitiesUri ||
       !tasksUri ||
       !activityUri ||
       !syncUri ||
@@ -384,6 +389,10 @@ export class DataManager {
         conflictsUri,
         {},
       );
+      const identities = await this.readOptionalJson<Record<string, LynvoIdentity>>(
+        identitiesUri,
+        {},
+      );
 
       return this.ensureBoardIntegrity({
         version: metadata.version,
@@ -391,6 +400,7 @@ export class DataManager {
         tasks,
         labels: metadata.labels,
         users,
+        identities,
         activity,
         sync,
         tombstones,
@@ -426,6 +436,7 @@ export class DataManager {
     const boardUri = this.joinModularPath("board.json");
     const columnsUri = this.joinModularPath("columns.json");
     const usersUri = this.joinModularPath("users.json");
+    const identitiesUri = this.joinModularPath("identities.json");
     const settingsUri = this.joinModularPath("settings.json");
     const tasksUri = this.joinModularPath("tasks");
     const commentsUri = this.joinModularPath("comments");
@@ -440,6 +451,7 @@ export class DataManager {
       !boardUri ||
       !columnsUri ||
       !usersUri ||
+      !identitiesUri ||
       !settingsUri ||
       !tasksUri ||
       !commentsUri ||
@@ -468,6 +480,7 @@ export class DataManager {
     });
     await this.writeJsonAtomic(columnsUri, cleanBoard.columns);
     await this.writeJsonAtomic(usersUri, cleanBoard.users || {});
+    await this.writeJsonAtomic(identitiesUri, cleanBoard.identities || {});
     await this.writeJsonAtomic(settingsUri, {});
     await this.writeJsonAtomic(syncUri, cleanBoard.sync || this.getDefaultSyncMetadata());
     await this.writeJsonAtomic(tombstonesUri, cleanBoard.tombstones || {});
@@ -1545,5 +1558,81 @@ export class DataManager {
         user, { metadata: { labelId } }
       );
     });
+  }
+
+  // ─── Identity management ────────────────────────────────────────────────
+
+  /** Register a new identity in the project. */
+  public static async registerIdentity(
+    displayName: string,
+    source: string,
+    sourceId: string,
+  ): Promise<LynvoIdentity> {
+    const identity: LynvoIdentity = {
+      id: this.createId("id"),
+      displayName: displayName.trim(),
+      source,
+      sourceId,
+      createdAt: Date.now(),
+    };
+
+    await this.mutateBoard(async (board) => {
+      board.identities = board.identities || {};
+      board.identities[identity.id] = identity;
+    });
+
+    return identity;
+  }
+
+  /** Resolve an identity by ID from the board data. */
+  public static async getIdentity(identityId: string): Promise<LynvoIdentity | undefined> {
+    const board = await this.loadBoard();
+    return board?.identities?.[identityId];
+  }
+
+  /** Assign (or unassign) a task to an identity. */
+  public static async assignTask(
+    taskId: string,
+    identityId: string | undefined,
+  ): Promise<void> {
+    await this.mutateBoard(async (board) => {
+      const task = board.tasks[taskId];
+      if (!task) {return;}
+      task.assigneeId = identityId;
+      task.updatedAt = Date.now();
+      const user = await AuthProvider.getGitHubUser();
+      if (user) {task.lastModifiedBy = user;}
+
+      const identity = identityId ? board.identities?.[identityId] : undefined;
+      const name = identity?.displayName || "Unassigned";
+      this.addActivity(
+        board,
+        "task_updated",
+        identityId ? `${task.title} ::: ${name}` : `${task.title} ::: Unassigned`,
+        user,
+        { taskId },
+      );
+    });
+  }
+
+  /** Validate a display name: non-empty, not "Unassigned", not a duplicate. */
+  public static validateDisplayName(
+    name: string,
+    identities: Record<string, LynvoIdentity>,
+  ): string | null {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return t("Display name cannot be empty.");
+    }
+    if (trimmed.toLowerCase() === "unassigned") {
+      return t("Display name \"Unassigned\" is reserved.");
+    }
+    const duplicate = Object.values(identities).some(
+      (id) => id.displayName.toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (duplicate) {
+      return t("An identity with the name \"{0}\" already exists.", trimmed);
+    }
+    return null;
   }
 }

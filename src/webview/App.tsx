@@ -77,7 +77,8 @@ type WebviewOutboundMessage =
   | { command: "deleteTodoLine"; taskId: string }
   | { command: "relinkTodo"; taskId: string }
   | { command: "convertBrokenTask"; taskId: string }
-  | { command: "removeCodeRefsForColumn"; colId: string };
+  | { command: "removeCodeRefsForColumn"; colId: string }
+  | { command: "assignTask"; taskId: string; identityId?: string };
 
 declare const acquireVsCodeApi: () => {
   postMessage: (msg: WebviewOutboundMessage) => void;
@@ -1131,6 +1132,7 @@ export const App: React.FC = () => {
   const [editLabelIds, setEditLabelIds] = useState<string[]>([]);
   const [editPriority, setEditPriority] = useState<Priority>("medium");
   const [editDueDate, setEditDueDate] = useState("");
+  const [editAssigneeId, setEditAssigneeId] = useState<string>("");
 
   const [isAddingColumn, setIsAddingColumn] = useState(false);
   const [newColTitle, setNewColTitle] = useState("");
@@ -1573,6 +1575,7 @@ export const App: React.FC = () => {
     setEditLabelIds(task.labelIds || []);
     setEditPriority(getTaskPriority(task));
     setEditDueDate(toDateInputValue(task.dueDate));
+    setEditAssigneeId(task.assigneeId || "");
     // Seed the edit form's drafts with the task's current Checklist and Relations.
     // The existing items keep their id so the panel can diff them on Save.
     setDraftChecklistByTask((prev) => ({
@@ -1649,6 +1652,15 @@ export const App: React.FC = () => {
       checklist: draftChecklist.map(({ id, text, done }) => ({ id, text: text.trim(), done })),
       relations: draftRelations.map(({ targetTaskId, relationType }) => ({ targetTaskId, type: relationType })),
     });
+
+    // Assignee is sent as a separate message so the panel can handle it atomically.
+    if (task && task.assigneeId !== (editAssigneeId || undefined)) {
+      vscode.postMessage({
+        command: "assignTask",
+        taskId,
+        identityId: editAssigneeId || undefined,
+      });
+    }
 
     setDraftChecklistByTask((prev) => ({ ...prev, [taskId]: [] }));
     setDraftRelationsByTask((prev) => ({ ...prev, [taskId]: [] }));
@@ -2066,6 +2078,23 @@ export const App: React.FC = () => {
                 onChange={(e) => setEditDueDate(e.target.value)}
                 style={{ flex: 1, padding: "6px" }}
               />
+            </div>
+            <div style={{ marginBottom: "8px" }}>
+              <div style={{ fontSize: "11px", fontWeight: 700, marginBottom: "4px" }}>{t("Assignee")}</div>
+              <select
+                value={editAssigneeId}
+                onChange={(e) => setEditAssigneeId(e.target.value)}
+                style={{ width: "100%", padding: "6px", boxSizing: "border-box" }}
+              >
+                <option value="">{t("Unassigned")}</option>
+                {Object.values(boardData?.identities || {})
+                  .sort((a, b) => a.displayName.localeCompare(b.displayName))
+                  .map((identity) => (
+                    <option key={identity.id} value={identity.id}>
+                      {identity.displayName}
+                    </option>
+                  ))}
+              </select>
             </div>
             {renderLabelSelector(editLabelIds, setEditLabelIds)}
             <div style={{ borderTop: "1px solid var(--vscode-widget-border)", paddingTop: "8px", marginTop: "8px" }}>
@@ -2534,7 +2563,11 @@ export const App: React.FC = () => {
                 color: "var(--vscode-textLink-foreground)",
               }}
             >
-              <span>{task.lastModifiedBy?.username}</span>
+              <span>
+                {task.assigneeId
+                  ? boardData?.identities?.[task.assigneeId]?.displayName || task.assigneeId
+                  : t("Unassigned")}
+              </span>
               <div style={{ textAlign: "right", color: "var(--vscode-descriptionForeground)" }}>
                 <div>{formatDateTime(task.createdAt)}</div>
                 {isEdited && <div>✎ {formatDateTime(task.updatedAt)}</div>}

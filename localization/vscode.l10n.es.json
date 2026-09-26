@@ -250,5 +250,17 @@
   "The code linked to this task could not be found (file deleted/renamed, or the marker removed). Convert this promoted task to a normal task? The link will be removed.": "El código vinculado a esta tarea no se pudo encontrar (archivo eliminado/renombrado, o el marcador eliminado). ¿Convertir esta tarea promovida en una tarea normal? El enlace se eliminará.",
   "This task is linked to a TODO comment in your code. Editing the title or description here writes to that comment in place (unsaved changes are respected). If you edit the comment in the code instead, the link goes stale — click the chain icon next to the title to re-sync it back to the board.": "Esta tarea está vinculada a un comentario TODO en tu código. Editar el título o la descripción aquí escribe en ese comentario en su lugar (los cambios no guardados se respetan). Si editas el comentario en el código, el enlace queda desactualizado; haz clic en el icono de cadena junto al título para re-sincronizarlo con el tablero.",
   "Update data": "Actualizar datos",
-  "Lynvo: your board data is on an older schema ({0}) than this extension ({1}). Update the data to the new schema?": "Lynvo: tus datos del tablero usan un esquema anterior ({0}) que esta extensión ({1}). ¿Quieres actualizarlos al nuevo esquema?"
+  "Lynvo: your board data is on an older schema ({0}) than this extension ({1}). Update the data to the new schema?": "Lynvo: tus datos del tablero usan un esquema anterior ({0}) que esta extensión ({1}). ¿Quieres actualizarlos al nuevo esquema?",
+  "Register Identity": "Registrar identidad",
+  "Choose identity source": "Elegir origen de identidad",
+  "Local (type a name)": "Local (escribir un nombre)",
+  "Display name (shown on the board)": "Nombre para mostrar (aparece en el tablero)",
+  "Source ID (unique tag for cross-referencing)": "ID de origen (etiqueta única para referencia cruzada)",
+  "Display name cannot be empty.": "El nombre para mostrar no puede estar vacío.",
+  "Display name \"Unassigned\" is reserved.": "El nombre \"Sin asignar\" está reservado.",
+  "Source ID cannot be empty.": "La ID de origen no puede estar vacía.",
+  "An identity with the name \"{0}\" already exists.": "Ya existe una identidad con el nombre \"{0}\".",
+  "Registered as \"{0}\".": "Registrado como \"{0}\".",
+  "Unassigned": "Sin asignar",
+  "Assignee": "Asignado a"
 }

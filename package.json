@@ -43,6 +43,7 @@
     "onCommand:lynvo.promoteTodo",
     "onCommand:lynvo.syncBoard",
     "onCommand:lynvo.connectGitHub",
+    "onCommand:lynvo.registerIdentity",
     "onCommand:lynvo.installSkills",
     "onCommand:lynvo.setLanguage"
   ],
@@ -52,6 +53,10 @@
       {
         "command": "lynvo.connectGitHub",
         "title": "%command.connectGitHub%"
+      },
+      {
+        "command": "lynvo.registerIdentity",
+        "title": "%command.registerIdentity%"
       },
       {
         "command": "lynvo.openBoard",

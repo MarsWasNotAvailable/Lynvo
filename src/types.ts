@@ -8,6 +8,14 @@ export interface LynvoPresenceUser extends LynvoUser {
   lastSeenAt: number;
 }
 
+export interface LynvoIdentity {
+  id: string;
+  displayName: string;
+  source: string;
+  sourceId: string;
+  createdAt: number;
+}
+
 export interface CodeReference {
   filePath: string;
   /** Unique Lynvo TODO marker token embedded in the source file (preferred). */
@@ -144,6 +152,8 @@ export interface LynvoTask {
   dueDate?: number;
   checklist?: LynvoChecklistItem[];
   relations?: LynvoTaskRelation[];
+  /** Identity ID of the assigned worker (references identities.json). */
+  assigneeId?: string;
 }
 
 export interface LynvoBoard {
@@ -152,6 +162,7 @@ export interface LynvoBoard {
   tasks: Record<string, LynvoTask>;
   labels?: Record<string, LynvoLabel>;
   users?: Record<string, LynvoPresenceUser>;
+  identities?: Record<string, LynvoIdentity>;
   activity?: Record<string, LynvoActivity>;
   sync?: LynvoSyncMetadata;
   tombstones?: Record<string, LynvoTombstone>;

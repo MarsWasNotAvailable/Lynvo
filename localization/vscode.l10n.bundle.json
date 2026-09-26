@@ -250,5 +250,17 @@
   "The code linked to this task could not be found (file deleted/renamed, or the marker removed). Convert this promoted task to a normal task? The link will be removed.": "The code linked to this task could not be found (file deleted/renamed, or the marker removed). Convert this promoted task to a normal task? The link will be removed.",
   "This task is linked to a TODO comment in your code. Editing the title or description here writes to that comment in place (unsaved changes are respected). If you edit the comment in the code instead, the link goes stale — click the chain icon next to the title to re-sync it back to the board.": "This task is linked to a TODO comment in your code. Editing the title or description here writes to that comment in place (unsaved changes are respected). If you edit the comment in the code instead, the link goes stale — click the chain icon next to the title to re-sync it back to the board.",
   "Update data": "Update data",
-  "Lynvo: your board data is on an older schema ({0}) than this extension ({1}). Update the data to the new schema?": "Lynvo: your board data is on an older schema ({0}) than this extension ({1}). Update the data to the new schema?"
+  "Lynvo: your board data is on an older schema ({0}) than this extension ({1}). Update the data to the new schema?": "Lynvo: your board data is on an older schema ({0}) than this extension ({1}). Update the data to the new schema?",
+  "Register Identity": "Register Identity",
+  "Choose identity source": "Choose identity source",
+  "Local (type a name)": "Local (type a name)",
+  "Display name (shown on the board)": "Display name (shown on the board)",
+  "Source ID (unique tag for cross-referencing)": "Source ID (unique tag for cross-referencing)",
+  "Display name cannot be empty.": "Display name cannot be empty.",
+  "Display name \"Unassigned\" is reserved.": "Display name \"Unassigned\" is reserved.",
+  "Source ID cannot be empty.": "Source ID cannot be empty.",
+  "An identity with the name \"{0}\" already exists.": "An identity with the name \"{0}\" already exists.",
+  "Registered as \"{0}\".": "Registered as \"{0}\".",
+  "Unassigned": "Unassigned",
+  "Assignee": "Assignee"
 }

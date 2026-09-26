@@ -486,6 +486,88 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("lynvo.registerIdentity", async () => {
+      // 1: Choose the identity source.
+      const source = await vscode.window.showQuickPick(
+        [
+          { id: "github", label: "GitHub" },
+          { id: "local", label: t("Local (type a name)") },
+        ],
+        { title: t("Register Identity"), placeHolder: t("Choose identity source") },
+      );
+      if (!source) {return;}
+
+      let displayName = "";
+      let sourceId = "";
+
+      switch (source.id) {
+        case "github":
+          // Use the GitHub auth session to pre-fill name and handle.
+          const user = await AuthProvider.getGitHubUser({ createIfNone: true });
+          if (!user) {return;}
+          displayName = user.username;
+          sourceId = user.githubId;
+          break;
+      
+        case "local":
+          // Local identity: ask for display name, then a source ID.
+
+          const name = await vscode.window.showInputBox({
+            title: t("Register Identity"),
+            prompt: t("Display name (shown on the board)"),
+            placeHolder: "e.g. John, Agent, …",
+            validateInput: (value) => {
+              if (!value.trim()) {return t("Display name cannot be empty.");}
+              if (value.trim().toLowerCase() === "unassigned") {
+                return t("Display name \"Unassigned\" is reserved.");
+              }
+              return undefined;
+            },
+          });
+          if (!name) {return;}
+          displayName = name.trim();
+
+          const sid = await vscode.window.showInputBox({
+            title: t("Register Identity"),
+            prompt: t("Source ID (try to be unique for cross-referencing with other projects)"),
+            placeHolder: "e.g. acme, agent-48, …",
+            validateInput: (value) => {
+              if (!value.trim()) {return t("Source ID cannot be empty.");}
+              return undefined;
+            },
+          });
+          if (!sid) {return;}
+          sourceId = sid.trim();
+          break;
+
+        case undefined:
+        default:
+          break;
+      }
+
+      // 2. Validate against existing identities (duplicate check).
+      const board = await DataManager.loadBoard();
+      const identities = board?.identities || {};
+      const error = DataManager.validateDisplayName(displayName, identities);
+      if (error) {
+        vscode.window.showErrorMessage(error);
+        return;
+      }
+
+      // 3. Register and set the local pointer.
+      const identity = await DataManager.registerIdentity(
+        displayName,
+        source.id,
+        sourceId,
+      );
+      await context.workspaceState.update("lynvo.myIdentityId", identity.id);
+      vscode.window.showInformationMessage(
+        t("Registered as \"{0}\".", identity.displayName),
+      );
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("lynvo.setLanguage", async () => {
       // Languages are auto-detected from the bundle files in localization folder;
       // display names come from the language code itself (no hardcoded map).

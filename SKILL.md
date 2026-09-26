@@ -24,6 +24,7 @@ All board data lives in `.vscode/lynvo/` within the workspace root:
   board.json          # Schema version + labels registry
   columns.json        # Board columns (id, title, color, position)
   users.json          # Presence data (GitHub users with lastSeenAt)
+  identities.json     # Known identities (display name, source, sourceId)
   settings.json       # User settings (currently empty object)
   tasks/
     {taskId}.json     # One JSON file per task
@@ -43,11 +44,12 @@ All board data lives in `.vscode/lynvo/` within the workspace root:
 
 ```typescript
 interface LynvoBoard {
-  version: string;              // "2.0.0"
+  version: string;              // "3.0.0"
   columns: Record<string, LynvoColumn>;
   tasks: Record<string, LynvoTask>;
   labels?: Record<string, LynvoLabel>;      // Optional — filled with defaults on load
   users?: Record<string, LynvoPresenceUser>; // Optional — filled with defaults on load
+  identities?: Record<string, LynvoIdentity>; // Optional — known workers (humans, agents)
   activity?: Record<string, LynvoActivity>;  // Optional — filled with defaults on load
   sync?: LynvoSyncMetadata;                  // Optional — filled with defaults on load
   tombstones?: Record<string, LynvoTombstone>; // Optional — filled with defaults on load
@@ -90,6 +92,7 @@ interface LynvoTask {
   };
   checklist?: LynvoChecklistItem[];
   relations?: LynvoTaskRelation[];
+  assigneeId?: string;               // Identity ID of the assigned worker (references identities.json)
 }
 ```
 
@@ -249,6 +252,25 @@ interface LynvoPresenceUser extends LynvoUser {
   lastSeenAt: number;  // Unix timestamp, active if within last 5 minutes
 }
 ```
+
+### LynvoIdentity
+
+```typescript
+interface LynvoIdentity {
+  id: string;          // Format: "id-{base36timestamp}-{random8}" — project-unique, opaque
+  displayName: string; // Human-readable name shown on the board (e.g. "John", "Agent")
+  source: string;      // Origin: "github" | "gitlab" | "local" | …
+  sourceId: string;    // Provider handle or local tag (e.g. "acme", "agent-1")
+  createdAt: number;   // Unix timestamp in milliseconds
+}
+```
+
+**Design notes:**
+- Identity is a **trust-based** project record. No encryption, no central registry.
+- The ID is project-unique and opaque; `sourceId` is the cross-referencing handle.
+- The "my identity" pointer is stored per-machine in VS Code workspace state (`lynvo.myIdentityId`), not in the JSON.
+- Display names are case-insensitively unique per project; "Unassigned" is reserved.
+- Tasks reference an identity via `assigneeId` (optional). When absent, the task is unassigned.
 
 ## Default Board State
 

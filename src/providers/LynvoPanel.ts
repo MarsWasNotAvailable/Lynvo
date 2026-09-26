@@ -660,6 +660,16 @@ export class LynvoPanel {
             LynvoPanel.refreshDataAndScheduleSync();
             return;
           }
+          case "assignTask": {
+            const taskId = asString(message.taskId);
+            const identityId = asString(message.identityId) || undefined;
+            if (!taskId) {
+              return;
+            }
+            await DataManager.assignTask(taskId, identityId);
+            LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
           case "reorderTasks": {
             const updates = asTaskReorderUpdates(message.updates);
             if (updates.length === 0) {
