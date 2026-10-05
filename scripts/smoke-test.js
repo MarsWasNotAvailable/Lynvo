@@ -22,7 +22,9 @@ const requiredCommands = [
   "lynvo.syncBoard",
   "lynvo.quickCreateTask",
   "lynvo.promoteTodo",
-  "lynvo.connectGitHub",
+  "lynvo.openIdentities",
+  "lynvo.setIdentity",
+  "lynvo.createIdentity",
 ];
 
 assert.strictEqual(pkg.name, "lynvo");

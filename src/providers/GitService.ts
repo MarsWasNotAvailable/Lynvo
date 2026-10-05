@@ -6,11 +6,14 @@ import * as path from "path";
 import { DataManager } from "./DataManager";
 import { getSchemaVersion } from "../schema";
 import { t } from "../l10n";
+import { parseIdentitiesFile, serializeIdentitiesFile } from "../identitiesFile";
 import {
   LynvoActivity,
   LynvoBoard,
   LynvoColumn,
   LynvoConflict,
+  LynvoDomain,
+  LynvoIdentity,
   LynvoLabel,
   LynvoPresenceUser,
   LynvoSyncMetadata,
@@ -195,6 +198,7 @@ export class GitService {
     const tasksPath = path.join(root, "tasks");
     const activityPath = path.join(root, "activity");
     const metadataPath = path.join(root, "metadata");
+    const identitiesPath = path.join(root, "identities.json");
 
     if (!(await this.pathExists(boardPath)) || !(await this.pathExists(columnsPath))) {
       return null;
@@ -249,12 +253,27 @@ export class GitService {
       }
     }
 
+    // identities.json holds both the identities and the domains registries.
+    let identities: Record<string, LynvoIdentity> = {};
+    let domainsOnFile: Record<string, LynvoDomain> | undefined;
+    if (await this.pathExists(identitiesPath)) {
+      try {
+        const parsed = parseIdentitiesFile(await this.readJson<unknown>(identitiesPath));
+        identities = parsed.identities;
+        domainsOnFile = parsed.domains;
+      } catch (error) {
+        console.error("Lynvo: invalid remote identities file", error);
+      }
+    }
+
     return {
       version: metadata.version || getSchemaVersion(),
       columns,
       tasks,
       labels: metadata.labels || {},
       users,
+      identities,
+      domains: domainsOnFile || {},
       activity,
       sync,
       tombstones,
@@ -279,6 +298,8 @@ export class GitService {
     });
     await this.writeJson(path.join(root, "columns.json"), board.columns);
     await this.writeJson(path.join(root, "users.json"), board.users || {});
+    // identities.json holds both the identities and the domains registries.
+    await this.writeJson(path.join(root, "identities.json"), serializeIdentitiesFile(board));
     await this.writeJson(path.join(root, "settings.json"), {});
     await this.writeJson(path.join(root, "metadata", "version.json"), {
       schemaVersion: getSchemaVersion(),
@@ -401,6 +422,14 @@ export class GitService {
       ...(remoteBoard.labels || {}),
       ...(localBoard.labels || {}),
     };
+    const mergedDomains = {
+      ...(remoteBoard.domains || {}),
+      ...(localBoard.domains || {}),
+    };
+    const mergedIdentities = {
+      ...(remoteBoard.identities || {}),
+      ...(localBoard.identities || {}),
+    };
 
     Object.values(mergedTombstones).forEach((tombstone) => {
       if (tombstone.entityType === "column") {delete mergedColumns[tombstone.entityId];}
@@ -412,6 +441,8 @@ export class GitService {
       columns: mergedColumns,
       tasks: mergedTasks,
       labels: mergedLabels,
+      domains: mergedDomains,
+      identities: mergedIdentities,
       users: {
         ...(remoteBoard.users || {}),
         ...(localBoard.users || {}),

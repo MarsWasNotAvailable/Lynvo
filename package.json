@@ -42,8 +42,9 @@
     "onCommand:lynvo.quickCreateTask",
     "onCommand:lynvo.promoteTodo",
     "onCommand:lynvo.syncBoard",
-    "onCommand:lynvo.connectGitHub",
-    "onCommand:lynvo.registerIdentity",
+    "onCommand:lynvo.openIdentities",
+    "onCommand:lynvo.setIdentity",
+    "onCommand:lynvo.createIdentity",
     "onCommand:lynvo.installSkills",
     "onCommand:lynvo.setLanguage"
   ],
@@ -51,12 +52,16 @@
   "contributes": {
     "commands": [
       {
-        "command": "lynvo.connectGitHub",
-        "title": "%command.connectGitHub%"
+        "command": "lynvo.openIdentities",
+        "title": "%command.openIdentities%"
       },
       {
-        "command": "lynvo.registerIdentity",
-        "title": "%command.registerIdentity%"
+        "command": "lynvo.setIdentity",
+        "title": "%command.setIdentity%"
+      },
+      {
+        "command": "lynvo.createIdentity",
+        "title": "%command.createIdentity%"
       },
       {
         "command": "lynvo.openBoard",

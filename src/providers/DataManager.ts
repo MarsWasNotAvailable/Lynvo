@@ -7,6 +7,7 @@ import {
   LynvoChecklistItem,
   LynvoColumn,
   LynvoConflict,
+  LynvoDomain,
   LynvoIdentity,
   LynvoLabel,
   LynvoPresenceUser,
@@ -15,10 +16,11 @@ import {
   LynvoTaskRelation,
   LynvoTaskRelationType,
   LynvoTombstone,
+  LynvoUser,
 } from "../types";
-import { AuthProvider } from "./AuthProvider";
 import { t } from "../l10n";
 import { canonicalizeRelation } from "../relationModel";
+import { parseIdentitiesFile, serializeIdentitiesFile } from "../identitiesFile";
 import {
   compareSemVer,
   getChangelogUrl,
@@ -125,6 +127,9 @@ export class DataManager {
       },
       users: {},
       identities: {},
+      domains: {
+        local: { name: "local", createdAt: Date.now() },
+      },
       sync: this.getDefaultSyncMetadata(),
       tombstones: {},
       conflicts: {},
@@ -147,6 +152,64 @@ export class DataManager {
     return `${prefix}-${Date.now().toString(36)}-${random}`;
   }
 
+  /**
+   * Normalize a stored `createdBy`/`lastModifiedBy` value to the identity-ID form.
+   * - string -> already an identity ID, kept as-is.
+   * - legacy `{ githubId, username }` object -> the ID of a matching existing identity
+   *   (by display name or source ID), or one materialized from the pair.
+   * - the "Unknown" user or missing -> undefined (anonymous).
+   * Invoked only by the user-confirmed schema migration (migrateToCurrentSchema).
+   */
+  private static normalizeSigningRef(
+    raw: unknown,
+    identities: Record<string, LynvoIdentity>,
+  ): string | undefined {
+    if (typeof raw === "string") {
+      return raw;
+    }
+    if (!raw || typeof raw !== "object") {
+      return undefined;
+    }
+    const legacy = raw as Record<string, unknown>;
+    const username = typeof legacy.username === "string" ? legacy.username.trim() : "";
+    const providerId = typeof legacy.githubId === "string" ? legacy.githubId.trim() : "";
+    if (!username || username.toLowerCase() === "unknown") {
+      return undefined; // anonymous
+    }
+    const lowered = username.toLowerCase();
+    const match = Object.values(identities).find(
+      (identity) =>
+        identity.displayName.toLowerCase() === lowered ||
+        identity.sourceId.toLowerCase() === lowered ||
+        (providerId !== "unknown" &&
+          identity.sourceId.toLowerCase() === providerId.toLowerCase()),
+    );
+    if (match) {
+      return match.id;
+    }
+    // Materialize the legacy user as a new identity so that the reference stays resolvable.
+    const identity: LynvoIdentity = {
+      id: this.createId("id"),
+      displayName: username,
+      source: providerId === "unknown" ? "local" : "github",
+      sourceId: providerId === "unknown" ? username : providerId,
+      createdAt: Date.now(),
+    };
+    identities[identity.id] = identity;
+    return identity.id;
+  }
+
+  /**
+   * Map the signing identity (or anonymous) to the legacy display shape still
+   * used by the activity actor, presence entries and tombstones.
+   */
+  private static toLegacyUser(identity: LynvoIdentity | undefined): LynvoUser {
+    if (identity) {
+      return { githubId: identity.sourceId, username: identity.displayName };
+    }
+    return UNKNOWN_USER;
+  }
+
   private static ensureBoardIntegrity(board: Partial<LynvoBoard>): LynvoBoard {
     const defaults = this.getDefaultBoard();
     const next: LynvoBoard = {
@@ -162,6 +225,7 @@ export class DataManager {
       labels: board.labels || defaults.labels,
       users: board.users || {},
       identities: board.identities || {},
+      domains: board.domains || {},
       activity: board.activity || {},
       sync: {
         ...this.getDefaultSyncMetadata(),
@@ -170,6 +234,12 @@ export class DataManager {
       tombstones: board.tombstones || {},
       conflicts: board.conflicts || {},
     };
+
+    // The "local" domain always exists (domains is optional on the type, so guard first).
+    if (!next.domains) {next.domains = {};}
+    if (!next.domains["local"]) {
+      next.domains["local"] = { name: "local", createdAt: Date.now() };
+    }
 
     const sortedColumns = Object.values(next.columns).sort(
       (a, b) => a.position - b.position,
@@ -190,10 +260,11 @@ export class DataManager {
 
       if (!task.createdAt) {task.createdAt = Date.now();}
       if (!task.updatedAt) {task.updatedAt = task.createdAt;}
-      if (!task.createdBy) {
-        task.createdBy = UNKNOWN_USER;
-      }
-      if (!task.lastModifiedBy) {
+      // Those attribution fields are left as-is on load:
+      // the legacy { githubId, username } objects are only converted
+      // by the user-confirmed schema migration.
+      // While unassigned tasks simply have these fields unset.
+      if (!task.lastModifiedBy && task.createdBy) {
         task.lastModifiedBy = task.createdBy;
       }
       if (!task.labelIds) {
@@ -389,10 +460,18 @@ export class DataManager {
         conflictsUri,
         {},
       );
-      const identities = await this.readOptionalJson<Record<string, LynvoIdentity>>(
-        identitiesUri,
-        {},
-      );
+      // identities.json holds both the identities and the domains registries.
+      let identities: Record<string, LynvoIdentity> = {};
+      let domainsOnFile: Record<string, LynvoDomain> | undefined;
+      if (await this.exists(identitiesUri)) {
+        try {
+          const parsed = parseIdentitiesFile(await this.readJson<unknown>(identitiesUri));
+          identities = parsed.identities;
+          domainsOnFile = parsed.domains;
+        } catch (error) {
+          console.error("Lynvo: invalid identities file", error);
+        }
+      }
 
       return this.ensureBoardIntegrity({
         version: metadata.version,
@@ -401,6 +480,7 @@ export class DataManager {
         labels: metadata.labels,
         users,
         identities,
+        domains : domainsOnFile ?? {},
         activity,
         sync,
         tombstones,
@@ -480,7 +560,8 @@ export class DataManager {
     });
     await this.writeJsonAtomic(columnsUri, cleanBoard.columns);
     await this.writeJsonAtomic(usersUri, cleanBoard.users || {});
-    await this.writeJsonAtomic(identitiesUri, cleanBoard.identities || {});
+    // identities.json holds both the identities and the domains registries.
+    await this.writeJsonAtomic(identitiesUri, serializeIdentitiesFile(cleanBoard));
     await this.writeJsonAtomic(settingsUri, {});
     await this.writeJsonAtomic(syncUri, cleanBoard.sync || this.getDefaultSyncMetadata());
     await this.writeJsonAtomic(tombstonesUri, cleanBoard.tombstones || {});
@@ -534,7 +615,7 @@ export class DataManager {
     board: LynvoBoard,
     type: LynvoActivityType,
     message: string,
-    actor: LynvoActivity["actor"] | undefined,
+    actor: LynvoIdentity | undefined,
     options: Pick<LynvoActivity, "taskId" | "targetTaskId" | "metadata"> = {},
   ): void {
     const id = this.createId("activity");
@@ -543,7 +624,7 @@ export class DataManager {
       id,
       type,
       message,
-      actor: actor || { githubId: "unknown", username: "Unknown" },
+      actor: this.toLegacyUser(actor),
       createdAt: Date.now(),
       ...options,
     };
@@ -553,7 +634,7 @@ export class DataManager {
     board: LynvoBoard,
     entityType: LynvoTombstone["entityType"],
     entityId: string,
-    actor: LynvoTombstone["deletedBy"] | undefined,
+    actor: LynvoIdentity | undefined,
   ): void {
     const id = `${entityType}-${entityId}`;
     board.tombstones = board.tombstones || {};
@@ -562,7 +643,7 @@ export class DataManager {
       entityType,
       entityId,
       deletedAt: Date.now(),
-      deletedBy: actor || UNKNOWN_USER,
+      deletedBy: this.toLegacyUser(actor),
     };
   }
 
@@ -692,14 +773,21 @@ export class DataManager {
   }
 
   /**
-   * Migrate stored relation data to the canonical schema 3.0.0 model.
-   * For every stored "blocks A->B", ensure B has a "blocked-by -> A" (dedup),
-   * then drop A's "blocks" entry. Only `blocks` / `blocked-by` are touched;
-   * `related` / `duplicates` keep their stored direction.
+   * Migrate stored board data to the current schema (3.0.0).
+   * 1) Relations:
+   *    for every stored "blocks A->B", ensure B has a "blocked-by -> A" (dedup),
+   *    then drop A's "blocks" entry. Only `blocks` / `blocked-by` are touched;
+   *    `related` / `duplicates` keep their stored direction.
+   * 2) Attribution:
+   *    the legacy LynvoUser (`{ githubId, username }`) objects
+   *    found in Tasks (through the `createdBy` / `lastModifiedBy` properties)
+   *    should become an Identity by reusing a matching identity or creating one.
    * Finally the board version is stamped to the extension's schema version.
+   * Invoked only from the user-confirmed "Update data" migration prompt.
    */
-  public static async migrateRelationsSchema(): Promise<void> {
+  public static async migrateToCurrentSchema(): Promise<void> {
     await this.mutateBoard((board) => {
+      // 1) Canonicalize stored relations.
       for (const task of Object.values(board.tasks)) {
         const relations = task.relations || [];
         if (!relations.some((relation) => relation.type === "blocks")) {
@@ -735,6 +823,15 @@ export class DataManager {
         }
         task.relations = kept;
       }
+
+      // 2) Convert legacy attribution objects to identity IDs.
+      const identities = board.identities || (board.identities = {});
+      for (const task of Object.values(board.tasks)) {
+        task.createdBy = this.normalizeSigningRef(task.createdBy, identities);
+        task.lastModifiedBy =
+          this.normalizeSigningRef(task.lastModifiedBy, identities) ?? task.createdBy;
+      }
+
       board.version = getSchemaVersion();
     });
   }
@@ -743,7 +840,8 @@ export class DataManager {
    * Offer a one-time migration prompt when the persisted board data is
    * on an OLDER major schema than this extension (e.g. 2.x -> 3.x).
    * Only offered when this extension is the newest (persisted major < extension major).
-   * On acceptance it rewrites stored `blocks` into reciprocal `blocked-by`.
+   * On acceptance it runs the full schema migration (migrateToCurrentSchema):
+   * canonicalizes `blocks` relations and converts legacy attribution objects.
    * Declining leaves the data untouched (still readable).
    */
   public static async promptAndMigrateIfNeeded(
@@ -777,7 +875,7 @@ export class DataManager {
       updateButton,
     );
     if (choice === updateButton) {
-      await this.migrateRelationsSchema();
+      await this.migrateToCurrentSchema();
     }
   }
 
@@ -827,19 +925,19 @@ export class DataManager {
   }
 
   public static async touchCurrentUser(): Promise<void> {
-    const user = await AuthProvider.getGitHubUser();
-    if (!user) {
-      return;
-    }
-
     const run = this.writeQueue.catch(() => undefined).then(async () => {
       const board = await this.loadBoardUnsafe();
       if (!board) {
         return;
       }
+      const identity = await this.getSigningIdentity(board);
+      if (!identity) {
+        return; // No current identity: nothing to mark as present.
+      }
       board.users = board.users || {};
-      board.users[user.githubId] = {
-        ...user,
+      board.users[identity.id] = {
+        githubId: identity.sourceId,
+        username: identity.displayName,
         lastSeenAt: Date.now(),
       };
       await this.saveBoardUnsafe(board);
@@ -858,16 +956,16 @@ export class DataManager {
     await this.mutateBoard(async (board) => {
       if (!board.tasks[taskId] || !board.columns[newStatus]) {return;}
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const previousStatus = board.tasks[taskId].status;
       board.tasks[taskId].status = newStatus;
       board.tasks[taskId].updatedAt = Date.now();
-      if (user) {board.tasks[taskId].lastModifiedBy = user;}
+      if (instigator) {board.tasks[taskId].lastModifiedBy = instigator.id;}
       this.addActivity(
         board,
         "task_moved",
         `{${board.tasks[taskId].title}} ==> [${board.columns[newStatus].title}]`,
-        user,
+        instigator,
         {
           taskId,
           metadata: { from: previousStatus, to: newStatus },
@@ -885,7 +983,7 @@ export class DataManager {
     }>,
   ): Promise<void> {
     await this.mutateBoard(async (board) => {
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       updates.forEach((upd) => {
         const column = board.columns[upd.status];
         const task = board.tasks[upd.id];
@@ -895,12 +993,12 @@ export class DataManager {
         task.position = upd.position;
         if (upd.isDraggedTask) {
           task.updatedAt = Date.now();
-          if (user) {task.lastModifiedBy = user;}
+          if (instigator) {task.lastModifiedBy = instigator.id;}
           this.addActivity(
             board,
             "task_moved",
             `{${task.title}} ==> [${column.title}]`,
-            user,
+            instigator,
             {
               taskId: upd.id,
               metadata: { status: upd.status, position: upd.position },
@@ -939,7 +1037,7 @@ export class DataManager {
   ): Promise<string> {
     let newTaskId = "";
     await this.mutateBoard(async (board) => {
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const taskId = this.createId("task");
       newTaskId = taskId;
 
@@ -1005,8 +1103,8 @@ export class DataManager {
         title,
         description,
         status,
-        createdBy: user || { githubId: "unknown", username: "Unknown" },
-        lastModifiedBy: user || { githubId: "unknown", username: "Unknown" },
+        createdBy: instigator?.id,
+        lastModifiedBy: instigator?.id,
         createdAt: now,
         updatedAt: now,
         codeReference,
@@ -1023,7 +1121,7 @@ export class DataManager {
         })),
         relations: ownRelations,
       };
-      this.addActivity( board, "task_created", `{${title}}`, user, { taskId } );
+      this.addActivity( board, "task_created", `{${title}}`, instigator, { taskId } );
       // Log each relation added during promotion (parity with addTaskRelation):
       // blocks/blocked-by -> relation_blockedby_added,
       // duplicates -> relation_duplicates_added,
@@ -1034,7 +1132,7 @@ export class DataManager {
           board,
           generateRelationActivityType(edge.type, "added"),
           `{${edge.ownerTitle}} <+> {${edge.targetTitle}}`,
-          user,
+          instigator,
           { taskId, targetTaskId: edge.targetId, metadata: { type: edge.type, ownerId: edge.ownerId } },
         );
       }
@@ -1043,7 +1141,7 @@ export class DataManager {
           board,
           "link_added",
           `{${title}}`,
-          user,
+          instigator,
           { taskId, metadata: { filePath: codeReference.filePath } },
         );
       }
@@ -1063,7 +1161,7 @@ export class DataManager {
       const task = board.tasks[taskId];
       if (!task) {return;}
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const previousTitle = task.title;
       task.title = title;
       task.description = description;
@@ -1072,7 +1170,7 @@ export class DataManager {
       task.dueDate = dueDate;
       task.updatedAt = Date.now();
 
-      if (user) {task.lastModifiedBy = user;}
+      if (instigator) {task.lastModifiedBy = instigator.id;}
       // A title change is a rename ("old ==> new"); otherwise it's a generic edit.
       const isRename = previousTitle !== title;
       const message = isRename
@@ -1082,7 +1180,8 @@ export class DataManager {
         board,
         isRename ? "task_renamed" : "task_updated",
         message,
-        user, { taskId }
+        instigator,
+        { taskId }
       );
     });
   }
@@ -1100,19 +1199,20 @@ export class DataManager {
       const task = board.tasks[taskId];
       if (!task) {return;}
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const previousTitle = task.title;
       task.title = title;
       task.description = description;
       task.updatedAt = Date.now();
-      if (user) {task.lastModifiedBy = user;}
+      if (instigator) {task.lastModifiedBy = instigator.id;}
       const isRename = previousTitle !== title;
       const message = isRename ? `{${previousTitle}} ==> {${title}}` : `{${title}}`;
       this.addActivity(
         board,
         isRename ? "task_renamed" : "task_updated",
         message,
-        user, { taskId },
+        instigator,
+        { taskId },
       );
     });
   }
@@ -1122,18 +1222,18 @@ export class DataManager {
       const task = board.tasks[taskId];
       if (!task) {return;}
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       task.codeReference = undefined;
       task.updatedAt = Date.now();
-      if (user) {task.lastModifiedBy = user;}
-      this.addActivity( board, "link_removed", `{${task.title}}`, user, { taskId } );
+      if (instigator) {task.lastModifiedBy = instigator.id;}
+      this.addActivity( board, "link_removed", `{${task.title}}`, instigator, { taskId } );
     });
   }
 
   public static async deleteTask(taskId: string): Promise<void> {
     await this.mutateBoard(async (board) => {
       const taskTitle = board.tasks[taskId]?.title || "task";
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
 
       // Log the deleted task's OWN relations before removing it.
       // (schema 3.0.0: "Y blocks X" is stored on X as `blocked-by -> Y`,
@@ -1146,12 +1246,12 @@ export class DataManager {
           board,
           generateRelationActivityType(relation.type, "deleted"),
           `{${taskTitle}} <-> {${otherTitle}}`,
-          user,
+          instigator,
           { taskId, targetTaskId: relation.targetTaskId, metadata: { type: relation.type } },
         );
       }
 
-      this.addTombstone(board, "task", taskId, user);
+      this.addTombstone(board, "task", taskId, instigator);
       delete board.tasks[taskId];
 
       // Dangling references on the OTHER (surviving) tasks:
@@ -1165,13 +1265,13 @@ export class DataManager {
             board,
             generateRelationActivityType(relation.type, "deleted"),
             `{${task.title}} <-> {${taskTitle}}`,
-            user,
+            instigator,
             { taskId: task.id, targetTaskId: taskId, metadata: { type: relation.type } },
           );
         }
         task.relations = relations.filter((relation) => relation.targetTaskId !== taskId);
       });
-      this.addActivity(board, "task_deleted", `{${taskTitle}}`, user, { taskId });
+      this.addActivity(board, "task_deleted", `{${taskTitle}}`, instigator, { taskId });
     });
   }
 
@@ -1184,7 +1284,7 @@ export class DataManager {
       const task = board.tasks[taskId];
       if (!task || !text.trim()) {return;}
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const now = Date.now();
       const item: LynvoChecklistItem = {
         id: this.createId("check"),
@@ -1196,12 +1296,13 @@ export class DataManager {
 
       task.checklist = [...(task.checklist || []), item];
       task.updatedAt = now;
-      if (user) {task.lastModifiedBy = user;}
+      if (instigator) {task.lastModifiedBy = instigator.id;}
       this.addActivity(
         board,
         "checklist_added",
         `{${task.title}} ::: (${item.text})`,
-        user, { taskId }
+        instigator,
+        { taskId }
       );
     });
   }
@@ -1216,7 +1317,7 @@ export class DataManager {
       const item = task?.checklist?.find((entry) => entry.id === itemId);
       if (!task || !item) {return;}
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const previousText = item.text;
       if (typeof updates.text === "string") {
         item.text = updates.text.trim();
@@ -1228,7 +1329,7 @@ export class DataManager {
       const now = Date.now();
       item.updatedAt = now;
       task.updatedAt = now;
-      if (user) {task.lastModifiedBy = user;}
+      if (instigator) {task.lastModifiedBy = instigator.id;}
 
       // `updates.done` is `boolean | undefined`. The webview sends EITHER a
       // `done` toggle (checkbox) OR a `text` edit (field blur) — never both —
@@ -1254,7 +1355,7 @@ export class DataManager {
           ? `{${task.title}} ::: (${previousText}) ==> (${item.text})`
           : `{${task.title}} ::: (${item.text})`;
 
-      this.addActivity(board, type, message, user, { taskId });
+      this.addActivity(board, type, message, instigator, { taskId });
     });
   }
 
@@ -1266,16 +1367,17 @@ export class DataManager {
       const task = board.tasks[taskId];
       if (!task) {return;}
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const removedItem = task.checklist?.find((item) => item.id !== itemId);
       task.checklist = (task.checklist || []).filter((item) => item.id !== itemId);
       task.updatedAt = Date.now();
-      if (user) {task.lastModifiedBy = user;}
+      if (instigator) {task.lastModifiedBy = instigator.id;}
       this.addActivity(
         board,
         "checklist_deleted",
         `{${task.title}} ::: (${removedItem?.text || "_reference_lost_"})`,
-        user, { taskId }
+        instigator,
+        { taskId }
       );
     });
   }
@@ -1308,7 +1410,7 @@ export class DataManager {
       );
       if (alreadyExists) {return;}
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const relation: LynvoTaskRelation = {
         id: this.createId("rel"),
         type: storedType,
@@ -1318,12 +1420,12 @@ export class DataManager {
 
       owner.relations = [...relations, relation];
       owner.updatedAt = Date.now();
-      if (user) {owner.lastModifiedBy = user;}
+      if (instigator) {owner.lastModifiedBy = instigator.id;}
       this.addActivity(
         board,
         generateRelationActivityType(storedType, "added"),
         `{${owner.title}} <+> {${target.title}}`,
-        user,
+        instigator,
         { taskId: ownerId, targetTaskId: targetId, metadata: { type: storedType } },
       );
     });
@@ -1344,15 +1446,15 @@ export class DataManager {
       if (!relation) {return;}
       const targetTask = board.tasks[relation.targetTaskId];
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       task.relations = relations.filter((candidate) => candidate.id !== relationId);
       task.updatedAt = Date.now();
-      if (user) {task.lastModifiedBy = user;}
+      if (instigator) {task.lastModifiedBy = instigator.id;}
       this.addActivity(
         board,
         generateRelationActivityType(relation.type, "deleted"),
         `{${task.title}} <-> {${targetTask?.title || relation.targetTaskId}}`,
-        user,
+        instigator,
         { taskId, targetTaskId: relation.targetTaskId, metadata: { type: relation.type } },
       );
     });
@@ -1402,13 +1504,14 @@ export class DataManager {
 
   public static async createColumn(title: string, color: string): Promise<void> {
     await this.mutateBoard(async (board) => {
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const colId = this.createId("col");
       const position = Object.keys(board.columns).length;
       board.columns[colId] = { id: colId, title, color, position };
       this.addActivity(
         board, "column_created", `[${title}]`,
-        user, { metadata: { columnId: colId } }
+        instigator,
+        { metadata: { columnId: colId } }
       );
     });
   }
@@ -1422,7 +1525,7 @@ export class DataManager {
       const column = board.columns[id];
       if (!column) {return;}
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const previousTitle = column.title;
       const previousColor = column.color;
       column.title = title;
@@ -1445,7 +1548,8 @@ export class DataManager {
       }
       this.addActivity(
         board, type, message,
-        user, { metadata: { columnId: id } }
+        instigator,
+        { metadata: { columnId: id } }
       );
     });
   }
@@ -1454,7 +1558,7 @@ export class DataManager {
     await this.mutateBoard(async (board) => {
       if (!board.columns[id]) {return;}
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const title = board.columns[id].title;
       const columnsCount = Object.keys(board.columns).length;
       if (columnsCount <= 1) {
@@ -1465,10 +1569,11 @@ export class DataManager {
       }
 
       delete board.columns[id];
-      this.addTombstone(board, "column", id, user);
+      this.addTombstone(board, "column", id, instigator);
       this.addActivity(
         board, "column_deleted", `[${title}]`,
-        user, { metadata: { columnId: id } }
+        instigator,
+        { metadata: { columnId: id } }
       );
 
       for (const taskId in board.tasks) {
@@ -1493,13 +1598,14 @@ export class DataManager {
 
   public static async createLabel(name: string, color: string): Promise<void> {
     await this.mutateBoard(async (board) => {
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       if (!board.labels) {board.labels = {};}
       const labelId = this.createId("label");
       board.labels[labelId] = { id: labelId, name, color };
       this.addActivity(
         board, "label_created", `#${name}#`,
-        user, { metadata: { labelId } }
+        instigator,
+        { metadata: { labelId } }
       );
     });
   }
@@ -1519,13 +1625,13 @@ export class DataManager {
       if (trimmed) {label.name = trimmed;}
       label.color = color;
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       if (previousName !== label.name) {
         this.addActivity(
           board,
           "label_renamed",
           `#${previousName}# ==> #${label.name}#`,
-          user,
+          instigator,
           { metadata: { labelId } },
         );
       }
@@ -1534,7 +1640,7 @@ export class DataManager {
           board,
           "label_color_changed",
           `#${label.name}#`,
-          user,
+          instigator,
           { metadata: { labelId } },
         );
       }
@@ -1545,9 +1651,9 @@ export class DataManager {
     await this.mutateBoard(async (board) => {
       if (!board.labels || !board.labels[labelId]) {return;}
 
-      const user = await AuthProvider.getGitHubUser();
+      const instigator = await this.getSigningIdentity(board);
       const name = board.labels[labelId].name;
-      this.addTombstone(board, "label", labelId, user);
+      this.addTombstone(board, "label", labelId, instigator);
       delete board.labels[labelId];
 
       Object.values(board.tasks).forEach((task) => {
@@ -1555,39 +1661,222 @@ export class DataManager {
       });
       this.addActivity(
         board, "label_deleted", `#${name}#`,
-        user, { metadata: { labelId } }
+        instigator,
+        { metadata: { labelId } }
       );
     });
   }
 
   // ─── Identity management ────────────────────────────────────────────────
 
-  /** Register a new identity in the project. */
-  public static async registerIdentity(
+  /**
+   * Per-machine "current identity" pointer.
+   * Set by the UI (Register / Set Identity / Manage panel);
+   * persisted in VS Code workspace state by the extension,
+   * and used to sign createdBy / lastModifiedBy / activity actors.
+   * It is intentionally NOT stored in the board JSON (per-machine, not committed).
+   */
+  private static activeIdentityId: string | undefined;
+
+  public static setActiveIdentityId(id: string | undefined): void {
+    this.activeIdentityId = id;
+  }
+
+  public static getActiveIdentityId(): string | undefined {
+    return this.activeIdentityId;
+  }
+
+  /**
+   * Resolve the identity that signs `createdBy`/`lastModifiedBy` (as its ID)
+   * and the activity/presence/tombstone actors.
+   * Returns `undefined` when no current identity is set (anonymous).
+   * You should pass the in-memory `board` when available to avoid a redundant file read.
+   */
+  public static async getSigningIdentity(
+    board?: LynvoBoard,
+  ): Promise<LynvoIdentity | undefined> {
+    const id = this.activeIdentityId;
+    if (!id) {
+      return undefined;
+    }
+    if (board?.identities?.[id]) {
+      return board.identities[id];
+    }
+    try {
+      const uri = this.joinModularPath("identities.json");
+      if (uri && (await this.exists(uri))) {
+        const identities = parseIdentitiesFile(await this.readJson<unknown>(uri)).identities;
+        return identities?.[id];
+      }
+    } catch {
+      // Corrupt identities file: treat as anonymous.
+    }
+    return undefined;
+  }
+
+  /**
+   * Create a new identity.
+   * - `displayName` is the human-readable name the user types.
+   * - `source` is the Domain Provider: "local" | "github" | "gitlab".
+   * - `sourceId` is the name of the Domain in which the identity belongs (e.g. "acme", or a GitHub username).
+   * The sourceId is registered as a new (text) domain, if it does not exist yet.
+   */
+  public static async createIdentity(
     displayName: string,
     source: string,
     sourceId: string,
   ): Promise<LynvoIdentity> {
+    const name = displayName.trim();
+    const provider = (source || "").trim() || "local";
+    const domain = (sourceId || "").trim();
     const identity: LynvoIdentity = {
       id: this.createId("id"),
-      displayName: displayName.trim(),
-      source,
-      sourceId,
+      displayName: name,
+      source: provider,
+      sourceId: domain,
       createdAt: Date.now(),
     };
 
     await this.mutateBoard(async (board) => {
       board.identities = board.identities || {};
       board.identities[identity.id] = identity;
+      // Register the domain if it is not known yet (defensive).
+      if (domain) {
+        if (!board.domains) {board.domains = {};}
+        if (!board.domains[domain]) {
+          board.domains[domain] = { name: domain, createdAt: Date.now() };
+        }
+      }
     });
 
     return identity;
+  }
+
+  /** Add a domain (a text-based entry, or a remote auth provider). */
+  public static async addDomain(
+    name: string,
+    provider?: string,
+    providerId?: string,
+  ): Promise<LynvoDomain> {
+    const domainName = (name || "").trim();
+    const newDomain: LynvoDomain = {
+      name: domainName,
+      provider: provider || undefined,
+      providerId: providerId || undefined,
+      createdAt: Date.now(),
+    };
+    await this.mutateBoard(async (board) => {
+      board.domains = board.domains || {};
+      board.domains[domainName] = newDomain;
+    });
+    return newDomain;
+  }
+
+  /**
+   * Remove a domain and handle the identities that belong to it:
+   *  - keepIdentitiesLocal = true  -> re-home them onto the protected "local" domain
+   *    (their id, display name and task assignments are preserved);
+   *  - keepIdentitiesLocal = false -> delete them and clear their task assignments.
+   * The "local" domain is the fallback and is never removed.
+   */
+  public static async removeDomain(
+    name: string,
+    keepIdentitiesLocal: boolean,
+  ): Promise<void> {
+    const dom = (name || "").trim();
+    if (!dom || dom.toLowerCase() === "local") {
+      return;
+    }
+    await this.mutateBoard(async (board) => {
+      if (!board.domains || !board.domains[dom]) {
+        return;
+      }
+      delete board.domains[dom];
+
+      const affected = Object.values(board.identities || {}).filter(
+        (identity) => identity.sourceId === dom,
+      );
+      if (keepIdentitiesLocal) {
+        // Re-point the domain's identities at "local"; everything else is preserved.
+        affected.forEach((identity) => {identity.sourceId = "local";});
+        // Guarantee the new home exists in the registry.
+        if (!board.domains["local"]) {
+          board.domains["local"] = { name: "local", createdAt: Date.now() };
+        }
+      } else {
+        // Delete the domain's identities and unassign any tasks that pointed at them.
+        affected.forEach((identity) => {
+          if (board.identities) {delete board.identities[identity.id];}
+          Object.values(board.tasks).forEach((task) => {
+            if (task.assigneeId === identity.id) {
+              task.assigneeId = undefined;
+              task.updatedAt = Date.now();
+            }
+          });
+        });
+        // If the current pointer was one of the removed identities, drop it (in-memory).
+        if (affected.some((identity) => identity.id === this.activeIdentityId)) {
+          this.activeIdentityId = undefined;
+        }
+      }
+    });
+  }
+
+  /** Validate a domain name: non-empty and not already in use (case-insensitive). */
+  public static validateDomainName(
+    name: string,
+    domains: Record<string, LynvoDomain>,
+  ): string | null {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return t("Domain name cannot be empty.");
+    }
+    if (
+      Object.values(domains).some(
+        (domain) => domain.name.toLowerCase() === trimmed.toLowerCase(),
+      )
+    ) {
+      return t("A domain named \"{0}\" already exists.", trimmed);
+    }
+    return null;
   }
 
   /** Resolve an identity by ID from the board data. */
   public static async getIdentity(identityId: string): Promise<LynvoIdentity | undefined> {
     const board = await this.loadBoard();
     return board?.identities?.[identityId];
+  }
+
+  /** Rename an identity's display name (validated: non-empty, not reserved, not a duplicate). */
+  public static async editIdentityName(
+    identityId: string,
+    displayName: string,
+  ): Promise<void> {
+    await this.mutateBoard(async (board) => {
+      const identity = board.identities?.[identityId];
+      if (!identity) {return;}
+      const trimmed = displayName.trim();
+      if (trimmed) {identity.displayName = trimmed;}
+    });
+  }
+
+  /** Remove an identity, clear any task assignments pointing to it, and clear the pointer if it was current. */
+  public static async removeIdentity(identityId: string): Promise<void> {
+    await this.mutateBoard(async (board) => {
+      if (!board.identities?.[identityId]) {return;}
+      delete board.identities[identityId];
+      // Clear dangling assignees on tasks that referenced the removed identity.
+      Object.values(board.tasks).forEach((task) => {
+        if (task.assigneeId === identityId) {
+          task.assigneeId = undefined;
+          task.updatedAt = Date.now();
+        }
+      });
+      // If the removed identity was the current pointer, drop it (in-memory).
+      if (this.activeIdentityId === identityId) {
+        this.activeIdentityId = undefined;
+      }
+    });
   }
 
   /** Assign (or unassign) a task to an identity. */
@@ -1600,16 +1889,16 @@ export class DataManager {
       if (!task) {return;}
       task.assigneeId = identityId;
       task.updatedAt = Date.now();
-      const user = await AuthProvider.getGitHubUser();
-      if (user) {task.lastModifiedBy = user;}
+      const instigator = await this.getSigningIdentity(board);
+      if (instigator) {task.lastModifiedBy = instigator.id;}
 
-      const identity = identityId ? board.identities?.[identityId] : undefined;
-      const name = identity?.displayName || "Unassigned";
+      const assignee = identityId ? board.identities?.[identityId] : undefined;
+      const assigneeName = assignee?.displayName || "Unassigned";
       this.addActivity(
         board,
         "task_updated",
-        identityId ? `${task.title} ::: ${name}` : `${task.title} ::: Unassigned`,
-        user,
+        identityId ? `${task.title} <@> ${assigneeName}` : `${task.title} <@> Unassigned`,
+        instigator,
         { taskId },
       );
     });
@@ -1619,6 +1908,7 @@ export class DataManager {
   public static validateDisplayName(
     name: string,
     identities: Record<string, LynvoIdentity>,
+    excludeId?: string,
   ): string | null {
     const trimmed = name.trim();
     if (!trimmed) {
@@ -1628,7 +1918,7 @@ export class DataManager {
       return t("Display name \"Unassigned\" is reserved.");
     }
     const duplicate = Object.values(identities).some(
-      (id) => id.displayName.toLowerCase() === trimmed.toLowerCase(),
+      (id) => id.id !== excludeId && id.displayName.toLowerCase() === trimmed.toLowerCase(),
     );
     if (duplicate) {
       return t("An identity with the name \"{0}\" already exists.", trimmed);

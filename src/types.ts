@@ -8,12 +8,41 @@ export interface LynvoPresenceUser extends LynvoUser {
   lastSeenAt: number;
 }
 
+/**
+ * A `LynvoIdentity` contains :
+ * a generated `id` like `id-mur3r8ds-vow62vvv`,
+ * with a fancy name like `John`,
+ * which resides in a Domain like `john-doe-1234`,
+ * and that Domain might be sourced locally or remoteley (`local` vs `github`).
+ * A user `John` owning the account `john-doe-1234@github.com`,
+ * might be visualized as `John@john-doe-1234` in this internal system;
+ * and its local Agent might be visualized as `Agent@john-doe-1234`.
+ * This concept can be expanded to companies like, for example :
+ * `wile@acme` and `raplh@acme` employees belonging to the same Domain `acme`.
+ */
 export interface LynvoIdentity {
   id: string;
   displayName: string;
+  /** Domain Provider - Where does the domain comes from: "local" | "github" | "gitlab" ? */
   source: string;
+  /** Domain Name - What group does the Identity belongs to : "acme" | "a-github-username" ? */
   sourceId: string;
   createdAt: number;
+}
+
+/**
+ * A domain is used to group identities.
+ * The "local" domain always exists.
+ * Remote domains are created by authenticating with a provider
+ * (the account name becomes the domain);
+ * Local domains are created through the Manage Identity panel
+ * (their uniqueness outside the project cannot be guaranteed).
+ */
+export interface LynvoDomain {
+  name: string;          // "local" | "acme" (unique, used as the key)
+  provider?: string;     // "github" | "gitlab" for third-party domains; absent for text domains
+  providerId?: string;   // Provider account id (e.g. GitHub numeric id)
+  createdAt: number;     // Unix timestamp in milliseconds
 }
 
 export interface CodeReference {
@@ -141,8 +170,10 @@ export interface LynvoTask {
   title: string;
   description: string;
   status: string;
-  createdBy: LynvoUser;
-  lastModifiedBy: LynvoUser;
+  /** Identity ID (stored in identities.json) that created the task; undefined = anonymous. */
+  createdBy?: string;
+  /** Identity ID (stored in identities.json) that last modified the task; undefined = anonymous. */
+  lastModifiedBy?: string;
   createdAt: number;
   updatedAt: number;
   codeReference?: CodeReference;
@@ -163,6 +194,7 @@ export interface LynvoBoard {
   labels?: Record<string, LynvoLabel>;
   users?: Record<string, LynvoPresenceUser>;
   identities?: Record<string, LynvoIdentity>;
+  domains?: Record<string, LynvoDomain>;
   activity?: Record<string, LynvoActivity>;
   sync?: LynvoSyncMetadata;
   tombstones?: Record<string, LynvoTombstone>;

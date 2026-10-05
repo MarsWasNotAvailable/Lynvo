@@ -1,6 +1,7 @@
 {
-  "command.connectGitHub": "Lynvo: GitHub verbinden",
-  "command.registerIdentity": "Lynvo: Identität registrieren",
+  "command.openIdentities": "Lynvo: Identitäten verwalten",
+  "command.setIdentity": "Lynvo: Aktive Identität auswählen",
+  "command.createIdentity": "Lynvo: Identität erstellen",
   "command.openBoard": "Lynvo: Board öffnen",
   "command.openInsights": "Lynvo: Kennzahlen öffnen",
   "command.openTable": "Lynvo: Tabelle öffnen",

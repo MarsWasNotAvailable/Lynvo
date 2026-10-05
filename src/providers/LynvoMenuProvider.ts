@@ -74,10 +74,22 @@ export class LynvoMenuProvider
       icon: "sync",
     },
     {
-      label: "Connect GitHub",
-      command: "lynvo.connectGitHub",
-      tooltip: "Connect your locally assigned identity with your GitHub account",
-      icon: "github",
+      label: "Manage Identities",
+      command: "lynvo.openIdentities",
+      tooltip: "Manage identities, assignees, and the identity that signs your changes",
+      icon: "account",
+    },
+    {
+      label: "Set Identity",
+      command: "lynvo.setIdentity",
+      tooltip: "Choose which identity signs your changes (createdBy / lastModifiedBy)",
+      icon: "checklist",
+    },
+    {
+      label: "Create Identity",
+      command: "lynvo.createIdentity",
+      tooltip: "Create a new identity (from GitHub or locally). Use 'Set Identity' to make it current.",
+      icon: "add",
     },
     {
       label: "Install Agent Skills",

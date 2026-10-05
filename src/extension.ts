@@ -347,6 +347,14 @@ export function activate(context: vscode.ExtensionContext) {
     "lynvo.sidebarMenu",
     lynvoMenuProvider,
   );
+
+  // Restore the per-machine "current identity" pointer, used for signing
+  // createdBy and lastModifiedBy; and wire up its persistence to workspace state.
+  DataManager.setActiveIdentityId(context.workspaceState.get<string>("lynvo.activeIdentityId"));
+  LynvoPanel.setIdentityPersistence(async (id) => {
+    await context.workspaceState.update("lynvo.activeIdentityId", id);
+  });
+
   let refreshTimer: NodeJS.Timeout | undefined;
   const schedulePanelRefresh = () => {
     if (refreshTimer) {
@@ -476,24 +484,49 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("lynvo.connectGitHub", async () => {
-      const user = await AuthProvider.getGitHubUser({ createIfNone: true });
-      if (user) {
-        await DataManager.touchCurrentUser();
-        vscode.window.showInformationMessage(t("Connected as: {0}", user.username));
-      }
+    vscode.commands.registerCommand("lynvo.openIdentities", () => {
+      LynvoPanel.render(context.extensionUri, "identities");
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("lynvo.registerIdentity", async () => {
+    vscode.commands.registerCommand("lynvo.setIdentity", async () => {
+      const board = await DataManager.loadBoard();
+      const identities = Object.values(board?.identities || {});
+      if (identities.length === 0) {
+        vscode.window.showInformationMessage(t("No identities yet. Use 'Lynvo: Create Identity' to create one."));
+        return;
+      }
+      const options = identities
+        .sort((a, b) => a.displayName.localeCompare(b.displayName))
+        .map((identity) => ({
+          id: identity.id,
+          label: identity.displayName,
+          description: `${identity.source}:${identity.sourceId}`,
+        }));
+      const selected = await vscode.window.showQuickPick(options, {
+        title: t("Set Identity"),
+        placeHolder: t("Choose the identity that signs your changes"),
+      });
+      if (!selected) {return;}
+      DataManager.setActiveIdentityId(selected.id);
+      await context.workspaceState.update("lynvo.activeIdentityId", selected.id);
+      const identity = board?.identities?.[selected.id];
+      vscode.window.showInformationMessage(
+        t("Signing as \"{0}\".", identity?.displayName || selected.label),
+      );
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("lynvo.createIdentity", async () => {
       // 1: Choose the identity source.
       const source = await vscode.window.showQuickPick(
         [
           { id: "github", label: "GitHub" },
           { id: "local", label: t("Local (type a name)") },
         ],
-        { title: t("Register Identity"), placeHolder: t("Choose identity source") },
+        { title: t("Create Identity"), placeHolder: t("Choose identity source") },
       );
       if (!source) {return;}
 
@@ -501,19 +534,19 @@ export function activate(context: vscode.ExtensionContext) {
       let sourceId = "";
 
       switch (source.id) {
-        case "github":
+        case "github": {
           // Use the GitHub auth session to pre-fill name and handle.
           const user = await AuthProvider.getGitHubUser({ createIfNone: true });
           if (!user) {return;}
           displayName = user.username;
           sourceId = user.githubId;
           break;
-      
-        case "local":
-          // Local identity: ask for display name, then a source ID.
+        }
 
+        case "local": {
+          // Local identity: ask for display name, then a source ID.
           const name = await vscode.window.showInputBox({
-            title: t("Register Identity"),
+            title: t("Create Identity"),
             prompt: t("Display name (shown on the board)"),
             placeHolder: "e.g. John, Agent, …",
             validateInput: (value) => {
@@ -528,7 +561,7 @@ export function activate(context: vscode.ExtensionContext) {
           displayName = name.trim();
 
           const sid = await vscode.window.showInputBox({
-            title: t("Register Identity"),
+            title: t("Create Identity"),
             prompt: t("Source ID (try to be unique for cross-referencing with other projects)"),
             placeHolder: "e.g. acme, agent-48, …",
             validateInput: (value) => {
@@ -539,8 +572,8 @@ export function activate(context: vscode.ExtensionContext) {
           if (!sid) {return;}
           sourceId = sid.trim();
           break;
+        }
 
-        case undefined:
         default:
           break;
       }
@@ -554,15 +587,14 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      // 3. Register and set the local pointer.
-      const identity = await DataManager.registerIdentity(
+      // 3. Create the identity (the user can make it current via "Lynvo: Set Identity").
+      const identity = await DataManager.createIdentity(
         displayName,
         source.id,
         sourceId,
       );
-      await context.workspaceState.update("lynvo.myIdentityId", identity.id);
       vscode.window.showInformationMessage(
-        t("Registered as \"{0}\".", identity.displayName),
+        t("Created identity \"{0}\". Use \"Lynvo: Set Identity\" to make it current.", identity.displayName),
       );
     }),
   );

@@ -78,7 +78,14 @@ type WebviewOutboundMessage =
   | { command: "relinkTodo"; taskId: string }
   | { command: "convertBrokenTask"; taskId: string }
   | { command: "removeCodeRefsForColumn"; colId: string }
-  | { command: "assignTask"; taskId: string; identityId?: string };
+  | { command: "assignTask"; taskId: string; identityId?: string }
+  | { command: "addIdentity"; displayName: string; source: string; sourceId: string }
+  | { command: "addLocalDomain"; name: string }
+  | { command: "removeDomain"; name: string }
+  | { command: "addRemoteDomain"; provider: string }
+  | { command: "editIdentityName"; identityId: string; displayName: string }
+  | { command: "removeIdentity"; identityId: string }
+  | { command: "setCurrentIdentity"; identityId?: string };
 
 declare const acquireVsCodeApi: () => {
   postMessage: (msg: WebviewOutboundMessage) => void;
@@ -176,6 +183,49 @@ const PlusIcon = () => (
   </svg>
 );
 
+// The icon for the Domain on the Manage Identities panel
+const DomainIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="32"
+    height="32"
+    viewBox="0 0 32 32"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <rect x="2" y="4" width="28" height="26" rx="4" />
+    <rect x="6" y="7" width="8" height="8" rx="1" />
+    <rect x="6" y="19" width="8" height="8" rx="1" />
+    <rect x="18" y="7" width="8" height="8" rx="1" />
+    
+    <line x1="22" y1="20" x2="22" y2="26" />
+    <line x1="19" y1="23" x2="25" y2="23" />
+  </svg>
+);
+
+// Arrow out of a box: for action that necessitate to be forwarded somewhere else (like github auth).
+const ExternalArrowIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M7 17L17 7" />
+    <path d="M8 7h9v9" />
+  </svg>
+);
+
 // Broom glyph for the "Remove all tasks" (clear column) action.
 const BroomIcon = () => (
   <svg
@@ -270,7 +320,7 @@ const LinkIcon = () => (
   </svg>
 );
 
-type LynvoView = "board" | "table" | "activity" | "conflicts" | "insights" | "labels";
+type LynvoView = "board" | "table" | "activity" | "conflicts" | "insights" | "labels" | "identities";
 
 type Priority = "low" | "medium" | "high";
 type TableMode = "rows" | "map";
@@ -299,12 +349,13 @@ const clampMapZoom = (value: number): number =>
 type CodeLinkState = "synced" | "diverged" | "broken";
 
 type WebviewInboundMessage =
-  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; bundle?: l10nJsonFormat }
+  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; activeIdentityId?: string; bundle?: l10nJsonFormat }
   | { command: "setCodeLinkStates"; states: Record<string, CodeLinkState> }
   | { command: "setRemotePending"; pending: boolean }
   | { command: "switchView"; view: LynvoView }
   | { command: "createTaskResult"; success: boolean; error?: string }
-  | { command: "setLanguage"; bundle: l10nJsonFormat };
+  | { command: "setLanguage"; bundle: l10nJsonFormat }
+  | { command: "identityResult"; success: boolean; error?: string };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -315,7 +366,8 @@ const isLynvoView = (value: unknown): value is LynvoView =>
   value === "activity" ||
   value === "conflicts" ||
   value === "insights" ||
-  value === "labels";
+  value === "labels" ||
+  value === "identities";
 
 const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
   if (!isRecord(value)) {return null;}
@@ -325,6 +377,9 @@ const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
       data: (value.data as LynvoBoard | null) || null,
       remotePending: value.remotePending === true,
       codeLinkStates: (value.codeLinkStates as Record<string, CodeLinkState> | undefined) || {},
+      // Preserve the active-identity pointer so that a loadData round-trip (e.g. after setCurrentIdentity)
+      // confirms the radio value instead of reverting it to "unset".
+      activeIdentityId: typeof value.activeIdentityId === "string" ? value.activeIdentityId : undefined,
       bundle: isRecord(value.bundle) ? (value.bundle as l10nJsonFormat) : undefined,
     };
   }
@@ -346,6 +401,13 @@ const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
   }
   if (value.command === "setLanguage" && isRecord(value.bundle)) {
     return { command: "setLanguage", bundle: value.bundle as l10nJsonFormat };
+  }
+  if (value.command === "identityResult") {
+    return {
+      command: "identityResult",
+      success: value.success === true,
+      error: typeof value.error === "string" && value.error.length > 0 ? value.error : undefined,
+    };
   }
   return null;
 };
@@ -1101,6 +1163,20 @@ export const App: React.FC = () => {
   );
   const [activeView, setActiveView] = useState<LynvoView>("board");
   const [tableMode, setTableMode] = useState<TableMode>("rows");
+  // Identity management (Manage Identities panel).
+  const [activeIdentityId, setActiveIdentityId] = useState<string | undefined>(undefined);
+  const [newIdentityName, setNewIdentityName] = useState("");
+  const [newIdentitySource, setNewIdentitySource] = useState("local");
+  const [newIdentityDomain, setNewIdentityDomain] = useState("local");
+  const [identityError, setIdentityError] = useState("");
+  const [editingIdentityId, setEditingIdentityId] = useState<string | null>(null);
+  const [editIdentityName, setEditIdentityName] = useState("");
+  // "Add domain" form: a domain groups identities. "local" always exists;
+  // third-party domains are created by signing in with a provider (GitHub for now).
+  const [showAddDomain, setShowAddDomain] = useState(false);
+  const [domainInputType, setDomainInputType] = useState<"text" | "thirdparty">("text");
+  const [domainName, setDomainName] = useState("");
+  const [domainProvider, setDomainProvider] = useState("github");
   const [mapLinkSourceId, setMapLinkSourceId] = useState<string | null>(null);
   const [selectedMapTaskId, setSelectedMapTaskId] = useState<string | null>(null);
   const [isMapLinkMode, setIsMapLinkMode] = useState(false);
@@ -1229,11 +1305,29 @@ export const App: React.FC = () => {
         setIsSyncing(false);
         setRemotePending(Boolean(message.remotePending));
         setCodeLinkStates(message.codeLinkStates || {});
+        setActiveIdentityId(message.activeIdentityId);
         // A (re)initialized webview applies the host's active-language bundle
         // before its first render, so that it never shows a stale seed language.
         if (message.bundle) {
           setWebviewLanguage(message.bundle);
           setLangVersion((version) => version + 1);
+        }
+      }
+
+      if (message.command === "identityResult") {
+        if (!message.success && message.error) {
+          setIdentityError(message.error);
+        } else {
+          setIdentityError("");
+          // Reset the creation inputs and any in-progress name edit.
+          // Keep the Add-Domain form OPEN (like after a deletion)
+          // so that the user can keep adding / managing domains without reopening it.
+          setDomainName("");
+          setDomainInputType("text");
+          setNewIdentityName("");
+          setNewIdentitySource("local");
+          setNewIdentityDomain("local");
+          setEditingIdentityId(null);
         }
       }
 
@@ -1633,7 +1727,10 @@ export const App: React.FC = () => {
         relationKey(relation.relationType, relation.targetTaskId)).sort().join("\n")
         !== currentRelationKeys;
 
-    if (!fieldsHasChanged && !checklistHasChanged && !relationsHasChanged) {
+    // Assignee may be the only change; include it so an assignee-only edit is not dropped.
+    const assigneeHasChanged = (task?.assigneeId ?? undefined) !== (editAssigneeId || undefined);
+
+    if (!fieldsHasChanged && !checklistHasChanged && !relationsHasChanged && !assigneeHasChanged) {
       setEditingTaskId(null);
       return;
     }
@@ -1653,7 +1750,7 @@ export const App: React.FC = () => {
       relations: draftRelations.map(({ targetTaskId, relationType }) => ({ targetTaskId, type: relationType })),
     });
 
-    // Assignee is sent as a separate message so the panel can handle it atomically.
+    // Assignee is sent as a separate message so that the panel can handle it atomically.
     if (task && task.assigneeId !== (editAssigneeId || undefined)) {
       vscode.postMessage({
         command: "assignTask",
@@ -2803,6 +2900,359 @@ export const App: React.FC = () => {
     );
   };
 
+  const renderIdentitiesManager = () => {
+    if (!boardData) {return null;}
+
+    const identities = Object.values(boardData.identities || {})
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    // Domains are the "source" an identity belongs to.
+    // "local" always exists, even on boards that predate the domains registry.
+    const domainList = Object.values(boardData.domains || {})
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const domainOptions = domainList.some((d) => d.name === "local")
+      ? domainList
+      : [{ name: "local", createdAt: 0 }, ...domainList];
+
+    const assignedCountOf = (identityId: string) =>
+      Object.values(boardData.tasks || {})
+        .filter((task) => task.assigneeId === identityId).length;
+
+    const submitAddIdentity = () => {
+      if (!newIdentityName.trim()) {
+        setIdentityError(t("Display name cannot be empty."));
+        return;
+      }
+      if (!newIdentityDomain.trim()) {
+        setIdentityError(t("A domain must be selected for the identity."));
+        return;
+      }
+      setIdentityError("");
+      vscode.postMessage({
+        command: "addIdentity",
+        displayName: newIdentityName.trim(),
+        source: newIdentitySource,
+        sourceId: newIdentityDomain,
+      });
+      setNewIdentityName("");
+    };
+
+    const submitEditIdentity = (id: string) => {
+      setIdentityError("");
+      vscode.postMessage({
+        command: "editIdentityName",
+        identityId: id,
+        displayName: editIdentityName
+      });
+      setEditingIdentityId(null);
+    };
+
+    const submitAddLocalDomain = () => {
+      if (!domainName.trim()) {return;}
+      setIdentityError("");
+      vscode.postMessage({ command: "addLocalDomain", name: domainName.trim() });
+      setDomainName("");
+    };
+
+    const submitAddRemoteDomain = () => {
+      setIdentityError("");
+      vscode.postMessage({ command: "addRemoteDomain", provider: domainProvider });
+    };
+
+    const toggleAddDomain = () => {
+      setIdentityError("");
+      if (showAddDomain) {
+        // Reset the form state when closing it.
+        setDomainName("");
+        setDomainInputType("text");
+      }
+      setShowAddDomain((v) => !v);
+    };
+
+    // Shared per-column layout so that the header and each row stay aligned.
+    const colName: React.CSSProperties = { flex: "2 1 150px", minWidth: "150px" };
+    const colId: React.CSSProperties = { flex: "2 1 160px", minWidth: "160px" };
+    const colSource: React.CSSProperties = { flex: "0 0 84px" };
+    const colDomain: React.CSSProperties = { flex: "2 1 130px", minWidth: "130px" };
+    const colUsage: React.CSSProperties = { flex: "0 0 56px" };
+    const colActive: React.CSSProperties = { flex: "0 0 52px" };
+    const colActions: React.CSSProperties = { flex: "0 0 78px" };
+    const row: React.CSSProperties = {
+      display: "flex",
+      alignItems: "center",
+      gap: "10px",
+      padding: "9px 12px",
+    };
+
+    const typeButton = (kind: "text" | "thirdparty"): React.CSSProperties => ({
+      padding: "4px 10px",
+      borderRadius: "6px",
+      border: "1px solid var(--vscode-widget-border)",
+      backgroundColor: domainInputType === kind ? "var(--vscode-button-background)" : "transparent",
+      color: domainInputType === kind ? "var(--vscode-button-foreground)" : "inherit",
+      cursor: "pointer",
+    });
+
+    return (
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "8px" }}>
+          <div>
+            <h2 style={{ margin: 0 }}>{t("Identities")}</h2>
+            <div style={{ fontSize: "11px", color: "var(--vscode-descriptionForeground)" }}>
+              {t("Identities are the people or agents that can be assigned to tasks and that sign your changes.")}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            style={iconButtonStyle}
+            title={showAddDomain ? t("Cancel") : t("Add domain")}
+            aria-label={showAddDomain ? t("Cancel") : t("Add domain")}
+            onClick={toggleAddDomain}
+          >
+            {showAddDomain ? <span aria-hidden="true">×</span> : <DomainIcon />}
+          </button>
+        </div>
+
+        {showAddDomain && (
+          <div style={{ backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "12px", borderRadius: "8px", marginBottom: "16px" }}>
+            {/* Existing domains as bubbles. Each one carries a `x` to remove it - except the protected "local" */}
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "12px" }}>
+              {domainOptions.map((domain) => (
+                <span
+                  key={domain.name}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    fontSize: "11px",
+                    border: "1px solid var(--vscode-widget-border)",
+                    backgroundColor: "var(--vscode-editor-background)",
+                  }}
+                >
+                  {domain.name}
+                  {domain.name !== "local" && (
+                    <button
+                      type="button"
+                      title={t("Remove domain")}
+                      aria-label={`${t("Remove domain")}: ${domain.name}`}
+                      onClick={() => {
+                        setIdentityError("");
+                        vscode.postMessage({ command: "removeDomain", name: domain.name });
+                      }}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        padding: 0,
+                        margin: 0,
+                        cursor: "pointer",
+                        color: "var(--vscode-errorForeground)",
+                        fontSize: "13px",
+                        lineHeight: 1,
+                        display: "inline-flex",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span aria-hidden="true">×</span>
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: "6px", marginBottom: "10px", flexWrap: "wrap" }}>
+              <button type="button" onClick={() => setDomainInputType("text")} style={typeButton("text")}>{t("Text")}</button>
+              <button type="button" onClick={() => setDomainInputType("thirdparty")} style={typeButton("thirdparty")}>{t("Third-party auth")}</button>
+            </div>
+            {domainInputType === "text" ? (
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                <input
+                  autoFocus
+                  placeholder={t("New domain name...")}
+                  value={domainName}
+                  onChange={(e) => { setDomainName(e.target.value); setIdentityError(""); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") {submitAddLocalDomain();} }}
+                  style={{ flex: 1, minWidth: "160px", padding: "5px" }}
+                  aria-label={t("Domain name")}
+                />
+                <button type="button" className="icon-btn" style={iconButtonStyle} onClick={submitAddLocalDomain} disabled={!domainName.trim()} title={t("Add domain")} aria-label={t("Add domain")}><PlusIcon /></button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                <select
+                  value={domainProvider}
+                  onChange={(e) => setDomainProvider(e.target.value)}
+                  style={{ flex: 1, minWidth: "160px", padding: "5px" }}
+                  aria-label={t("Provider")}
+                >
+                  <option value="github">GitHub</option>
+                </select>
+                <button type="button" className="icon-btn" style={iconButtonStyle} onClick={submitAddRemoteDomain} title={t("Sign in with GitHub")} aria-label={t("Sign in with GitHub")}><ExternalArrowIcon /></button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {identityError && (
+          <div style={{ backgroundColor: "var(--vscode-inputValidation-errorBackground, #5a1d1d)", color: "var(--vscode-inputValidation-errorForeground, #f77)", padding: "8px 10px", borderRadius: "6px", marginBottom: "12px", fontSize: "12px" }}>
+            {identityError}
+          </div>
+        )}
+
+        <div
+          style={{
+            maxHeight: "58vh",
+            overflowY: "auto",
+            overflowX: "auto",
+            border: "1px solid var(--vscode-widget-border)",
+            borderRadius: "6px",
+          }}
+        >
+          {/* Header row */}
+          <div style={{ ...row, position: "sticky", top: 0, zIndex: 1, backgroundColor: "var(--vscode-editor-background)", fontWeight: 700, fontSize: "11px", color: "var(--vscode-descriptionForeground)", borderBottom: "1px solid var(--vscode-widget-border)" }}>
+            <div style={colName}>{t("Name")}</div>
+            <div style={colId}>{t("ID")}</div>
+            <div style={colSource}>{t("Source")}</div>
+            <div style={colDomain}>{t("Domain")}</div>
+            <div style={{ ...colUsage, textAlign: "right" }}>{t("Usage")}</div>
+            <div style={{ ...colActive, textAlign: "center" }}>{t("Active")}</div>
+            <div style={colActions} />
+          </div>
+
+          {identities.map((identity) => {
+            const isCurrent = identity.id === activeIdentityId;
+            const isEditing = editingIdentityId === identity.id;
+            return (
+              <div
+                key={identity.id}
+                style={{ ...row, borderBottom: "1px solid var(--vscode-widget-border)", backgroundColor: isCurrent ? "var(--vscode-list-activeSelectionBackground, transparent)" : "transparent" }}
+              >
+                {/* Name :
+                    Only the display name is editable (sourceId is locked, especially for remote domains).
+                    The Save/Cancel button live in the Actions cell (below) to avoid cursor travel. */}
+                <div style={colName}>
+                  {isEditing ? (
+                    <input
+                      autoFocus
+                      value={editIdentityName}
+                      onChange={(e) => { setEditIdentityName(e.target.value); setIdentityError(""); }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {submitEditIdentity(identity.id);}
+                        if (e.key === "Escape") {setEditingIdentityId(null);}
+                      }}
+                      style={{ width: "100%", minWidth: 0, padding: "3px" }}
+                      aria-label={t("Display name")}
+                    />
+                  ) : (
+                    <span style={{ fontWeight: 700, fontSize: "13px" }}>{identity.displayName}</span>
+                  )}
+                </div>
+
+                {/* ID */}
+                <div style={{ ...colId, fontSize: "11px", color: "var(--vscode-descriptionForeground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {identity.id}
+                </div>
+
+                {/* Source: provider (local / github / gitlab). */}
+                <div style={{ ...colSource, fontSize: "12px" }}>{identity.source}</div>
+
+                {/* Domain: the identity's domain (sourceId). */}
+                <div style={{ ...colDomain, fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{identity.sourceId}</div>
+
+                {/* Usage: number of tasks assigned to this identity. */}
+                <div style={{ ...colUsage, textAlign: "right", fontSize: "12px" }}>{assignedCountOf(identity.id)}</div>
+
+                {/* Active: a single radio to pick the identity that signs changes. */}
+                <div style={{ ...colActive, textAlign: "center" }}>
+                  <input
+                    type="radio"
+                    name="activeIdentity"
+                    value={identity.id}
+                    checked={isCurrent}
+                    onChange={() => {
+                      // Update optimistically so that the selection shows immediately;
+                      // the loadData round-trip then confirms and persists it.
+                      setActiveIdentityId(identity.id);
+                      vscode.postMessage({ command: "setCurrentIdentity", identityId: identity.id });
+                    }}
+                    title={t("Set as current")}
+                    aria-label={`${t("Set as current")}: ${identity.displayName}`}
+                  />
+                </div>
+
+                {/* Actions:
+                    The primary are Edit/Delete;
+                    When editing, Save/Cancel replace the primaries. */}
+                <div style={{ ...colActions, display: "flex", justifyContent: "flex-end", gap: "2px" }}>
+                  {isEditing ? (
+                    <>
+                      <button className="icon-btn" style={iconButtonStyle} onClick={() => submitEditIdentity(identity.id)} title={t("Save")} aria-label={t("Save")}><SaveIcon /></button>
+                      <button className="icon-btn" style={iconButtonStyle} onClick={() => setEditingIdentityId(null)} title={t("Cancel")} aria-label={t("Cancel")}><span aria-hidden="true">×</span></button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" className="icon-btn" style={iconButtonStyle} title={t("Edit name")} aria-label={t("Edit name")} onClick={() => { setEditingIdentityId(identity.id); setEditIdentityName(identity.displayName); setIdentityError(""); }}><EditIcon /></button>
+                      <button type="button" className="icon-btn delete" style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }} title={t("Remove")} aria-label={t("Remove")} onClick={() => vscode.postMessage({ command: "removeIdentity", identityId: identity.id })}><DeleteIcon /></button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {identities.length === 0 && (
+            <div style={{ padding: "20px", textAlign: "center", color: "var(--vscode-descriptionForeground)", fontSize: "13px" }}>
+              {t("No identities yet. Add one below.")}
+            </div>
+          )}
+
+          {/* Creation row — always the last line. */}
+          <div style={{ ...row, borderTop: identities.length > 0 ? "1px solid var(--vscode-widget-border)" : "none" }}>
+            <div style={colName}>
+              <input
+                placeholder={t("Display name (shown on the board)")}
+                value={newIdentityName}
+                onChange={(e) => { setNewIdentityName(e.target.value); setIdentityError(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter") {submitAddIdentity();} }}
+                style={{ width: "100%", padding: "5px" }}
+                aria-label={t("Display name")}
+              />
+            </div>
+            <div style={colId} />
+            <div style={colSource}>
+              <select
+                value={newIdentitySource}
+                onChange={(e) => setNewIdentitySource(e.target.value)}
+                style={{ width: "100%", padding: "5px" }}
+                aria-label={t("Source")}
+              >
+                <option value="local">{t("Local")}</option>
+                <option value="github">GitHub</option>
+              </select>
+            </div>
+            <div style={colDomain}>
+              <select
+                value={newIdentityDomain}
+                onChange={(e) => setNewIdentityDomain(e.target.value)}
+                style={{ width: "100%", padding: "5px" }}
+                aria-label={t("Domain")}
+              >
+                {domainOptions.map((domain) => (
+                  <option key={domain.name} value={domain.name}>{domain.name}</option>
+                ))}
+              </select>
+            </div>
+            <div style={colUsage} />
+            <div style={colActive} />
+            <div style={{ ...colActions, display: "flex", justifyContent: "flex-end" }}>
+              <button type="button" className="icon-btn" style={iconButtonStyle} onClick={submitAddIdentity} disabled={!newIdentityName.trim()} title={t("Add identity")} aria-label={t("Add identity")}><PlusIcon /></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderInsights = () => {
     if (!boardData) {return null;}
 
@@ -3492,6 +3942,7 @@ export const App: React.FC = () => {
             { id: "conflicts", label: unresolvedConflicts.length ? `${t("Conflicts")} (${unresolvedConflicts.length})` : t("Conflicts") },
             { id: "insights", label: t("Insights") },
             { id: "labels", label: t("Labels") },
+            { id: "identities", label: t("Identities") },
           ] as { id: LynvoView; label: string }[]).map((item) => (
             <button
               key={item.id}
@@ -3755,6 +4206,7 @@ export const App: React.FC = () => {
       {boardData && activeView === "conflicts" && renderConflictsView()}
       {boardData && activeView === "insights" && renderInsights()}
       {boardData && activeView === "labels" && renderLabelsManager()}
+      {boardData && activeView === "identities" && renderIdentitiesManager()}
     </div>
   );
 };

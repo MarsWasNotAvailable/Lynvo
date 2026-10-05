@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { DataManager } from "./DataManager";
 import { GitService } from "./GitService";
+import { AuthProvider } from "./AuthProvider";
 import { getWebviewBundle, t } from "../l10n";
 import {
   applyRelationPlan,
@@ -103,7 +104,8 @@ type LynvoView =
   | "activity"
   | "conflicts"
   | "insights"
-  | "labels";
+  | "labels"
+  | "identities";
 
 type WebviewMessage = {
   command?: string;
@@ -523,7 +525,26 @@ export class LynvoPanel {
         data: board,
         codeLinkStates,
         remotePending: GitService.getRemotePending(),
+        activeIdentityId: DataManager.getActiveIdentityId(),
       });
+    }
+  }
+
+  /**
+   * An entension-registered callback that persists the "current identity" pointer to
+   * the VS Code workspace state. We're keeping it per-machine, and out of the repo.
+   */
+  private static _persistIdentity: ((id: string | undefined) => Promise<void>) | undefined;
+
+  public static setIdentityPersistence(
+    callback: (id: string | undefined) => Promise<void>,
+  ): void {
+    this._persistIdentity = callback;
+  }
+
+  private static async persistIdentity(id: string | undefined): Promise<void> {
+    if (this._persistIdentity) {
+      await this._persistIdentity(id);
     }
   }
 
@@ -643,6 +664,7 @@ export class LynvoPanel {
               command: "loadData",
               data: board,
               codeLinkStates,
+              activeIdentityId: DataManager.getActiveIdentityId(),
               // Include the current bundle so that a (re)initialized webview
               // (e.g. after VS Code re-navigated it to its seed HTML)
               // renders in the active language, not the stale seed.
@@ -667,6 +689,159 @@ export class LynvoPanel {
               return;
             }
             await DataManager.assignTask(taskId, identityId);
+            LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
+          case "addIdentity": {
+            const displayName = asString(message.displayName) || "";
+            const source = asString(message.source) || "local";
+            const sourceId = asString(message.sourceId) || "";
+            const board = await DataManager.loadBoard();
+            const identities = board?.identities || {};
+            const error = DataManager.validateDisplayName(displayName, identities);
+            if (error) {
+              webview.postMessage({ command: "identityResult", success: false, error });
+              return;
+            }
+            if (!sourceId.trim()) {
+              webview.postMessage({
+                command: "identityResult",
+                success: false,
+                error: t("A domain must be selected for the identity."),
+              });
+              return;
+            }
+            await DataManager.createIdentity(displayName, source, sourceId);
+            LynvoPanel.refreshDataAndScheduleSync();
+            webview.postMessage({ command: "identityResult", success: true });
+            return;
+          }
+          case "addLocalDomain": {
+            const name = asString(message.name) || "";
+            const board = await DataManager.loadBoard();
+            const domains = board?.domains || {};
+            const error = DataManager.validateDomainName(name, domains);
+            if (error) {
+              webview.postMessage({ command: "identityResult", success: false, error });
+              return;
+            }
+            // A local domain is a plain text entry : no `provider` to pass.
+            await DataManager.addDomain(name);
+            LynvoPanel.refreshDataAndScheduleSync();
+            webview.postMessage({ command: "identityResult", success: true });
+            return;
+          }
+          case "removeDomain": {
+            const name = asString(message.name) || "";
+            if (!name) {
+              return;
+            }
+            // "local" is the protected fallback domain: it is never removed.
+            if (name === "local") {
+              webview.postMessage({ command: "identityResult", success: false, error: t('The "local" domain cannot be removed.') });
+              return;
+            }
+            // Count the identities that live in this domain so that we can choose how to handle them.
+            const board = await DataManager.loadBoard();
+            const affected = Object.values(board?.identities || {})
+              .filter((identity) => identity.sourceId === name).length;
+
+            let keepIdentitiesLocal = true;
+            if (affected === 0) {
+              // No identities in this domain: a single confirm is enough.
+              const removeAction = t("Remove");
+              const choice = await vscode.window.showWarningMessage(
+                t('Remove domain "{0}"?', name),
+                { modal: true },
+                removeAction,
+              );
+              if (choice !== removeAction) {return;} // The user cancelled.
+            } else {
+              // Identities present: let the user decide what happens to the identities,
+              // since this may affect many tasks
+              const deleteWithAction = t("Delete, including identities");
+              const keepLocalAction = t("Delete, keep identities local");
+              const choice = await vscode.window.showWarningMessage(
+                t('Remove domain "{0}"? It contains {1} identity(ies).', name, affected),
+                { modal: true },
+                deleteWithAction,
+                keepLocalAction,
+              );
+              if (choice === deleteWithAction) {
+                keepIdentitiesLocal = false;
+              } else if (choice === keepLocalAction) {
+                keepIdentitiesLocal = true;
+              } else {
+                return; // The user cancelled.
+              }
+            }
+
+            await DataManager.removeDomain(name, keepIdentitiesLocal);
+            // If the active identity was deleted along with the domain, clear the pointer.
+            if (DataManager.getActiveIdentityId() === undefined) {
+              await LynvoPanel.persistIdentity(undefined);
+            }
+            LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
+          case "addRemoteDomain": {
+            const provider = asString(message.provider) || "github";
+            const user = await AuthProvider.getGitHubUser({ createIfNone: true });
+            if (!user) {
+              webview.postMessage({
+                command: "identityResult",
+                success: false,
+                error: t("GitHub sign-in was cancelled or failed."),
+              });
+              return;
+            }
+            const board = await DataManager.loadBoard();
+            const domains = board?.domains || {};
+            const alreadyExists = Object.values(domains).some(
+              (domain) => domain.name.toLowerCase() === user.username.toLowerCase(),
+            );
+            if (!alreadyExists) {
+              await DataManager.addDomain(user.username, provider, user.githubId);
+            }
+            LynvoPanel.refreshDataAndScheduleSync();
+            webview.postMessage({ command: "identityResult", success: true });
+            return;
+          }
+          case "editIdentityName": {
+            const identityId = asString(message.identityId);
+            const displayName = asString(message.displayName) || "";
+            if (!identityId) {
+              return;
+            }
+            const board = await DataManager.loadBoard();
+            const identities = board?.identities || {};
+            const error = DataManager.validateDisplayName(displayName, identities, identityId);
+            if (error) {
+              webview.postMessage({ command: "identityResult", success: false, error });
+              return;
+            }
+            await DataManager.editIdentityName(identityId, displayName);
+            LynvoPanel.refreshDataAndScheduleSync();
+            webview.postMessage({ command: "identityResult", success: true });
+            return;
+          }
+          case "removeIdentity": {
+            const identityId = asString(message.identityId);
+            if (!identityId) {
+              return;
+            }
+            await DataManager.removeIdentity(identityId);
+            // If the removed identity was the current pointer, persist the cleared pointer.
+            if (DataManager.getActiveIdentityId() === undefined) {
+              await LynvoPanel.persistIdentity(undefined);
+            }
+            LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
+          case "setCurrentIdentity": {
+            const identityId = asString(message.identityId) || undefined;
+            DataManager.setActiveIdentityId(identityId);
+            await LynvoPanel.persistIdentity(identityId);
             LynvoPanel.refreshDataAndScheduleSync();
             return;
           }

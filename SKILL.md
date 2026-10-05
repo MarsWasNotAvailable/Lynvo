@@ -23,8 +23,8 @@ All board data lives in `.vscode/lynvo/` within the workspace root:
 .vscode/lynvo/
   board.json          # Schema version + labels registry
   columns.json        # Board columns (id, title, color, position)
-  users.json          # Presence data (GitHub users with lastSeenAt)
-  identities.json     # Known identities (display name, source, sourceId)
+  users.json          # Presence data (identity display shape with lastSeenAt)
+  identities.json     # Known identities + domains registry (display name, source, domain)
   settings.json       # User settings (currently empty object)
   tasks/
     {taskId}.json     # One JSON file per task
@@ -50,6 +50,7 @@ interface LynvoBoard {
   labels?: Record<string, LynvoLabel>;      // Optional — filled with defaults on load
   users?: Record<string, LynvoPresenceUser>; // Optional — filled with defaults on load
   identities?: Record<string, LynvoIdentity>; // Optional — known workers (humans, agents)
+  domains?: Record<string, LynvoDomain>;      // Optional — identity domains; "local" always present
   activity?: Record<string, LynvoActivity>;  // Optional — filled with defaults on load
   sync?: LynvoSyncMetadata;                  // Optional — filled with defaults on load
   tombstones?: Record<string, LynvoTombstone>; // Optional — filled with defaults on load
@@ -76,8 +77,8 @@ interface LynvoTask {
   title: string;
   description: string;                 // Markdown: lists, checklists, code, links, quotes
   status: string;                      // Column id reference
-  createdBy: LynvoUser;                // { githubId, username, avatarUrl? }
-  lastModifiedBy: LynvoUser;
+  createdBy?: string;                  // Identity ID (from identities.json); undefined = anonymous
+  lastModifiedBy?: string;             // Identity ID (from identities.json); undefined = anonymous
   createdAt: number;                   // Unix timestamp in milliseconds
   updatedAt: number;                   // Unix timestamp in milliseconds
   position?: number;                   // Order within the column (defaults to createdAt)
@@ -151,7 +152,8 @@ Message format convention (all relation/state symbols are 3-char for easy global
 `"task" <-> "task"` is removing a relation between two tasks;
 `"task" <=> "task"` is the generic catch-all meaning "these two tasks are related";
 `"old"  ==> "new"` is a state change (a rename);
-`"task" ::: "item"` is membership (an item on its task).
+`"task" ::: "item"` is membership (an item on its task);
+`"task" <@> "name"` is an assignment (a task attached to an identity).
 Column items are wrapped with square brackets : [...] .
 Task items are wrapped with curly brackets : {...} .
 Checklist items are wrapped with parenthesis : (...) .
@@ -161,7 +163,7 @@ Anything else would be wrapped with quotes : “...” .
 | Value | When to Use |
 |---|---|
 | `task_created` | New task created |
-| `task_updated` | Task description, labels, priority, or dueDate changed (deprecated for title changes — use `task_renamed`) |
+| `task_updated` | Task description, labels, priority, dueDate, or **assignee** changed; an assignment shows as `task <@> identity` (deprecated for title changes — use `task_renamed`) |
 | `task_renamed` | Task title renamed, shown as `"old" ==> "new"` |
 | `task_moved` | Task moved between columns or reordered within column, shown as `{task} ==> [column]` |
 | `task_deleted` | Task removed |
@@ -253,22 +255,42 @@ interface LynvoPresenceUser extends LynvoUser {
 }
 ```
 
+> **Scope note:** `LynvoUser` is the legacy *display* shape, still used for the activity feed `actor`, presence entries and tombstone `deletedBy`. Task `createdBy`/`lastModifiedBy` no longer use it — they store a raw identity ID (see `LynvoIdentity`).
+
+### LynvoDomain
+
+A **domain** groups identities — think of it as a "company" or organization. `local` always exists and holds ad-hoc identities. A domain is created either by typing a name (a *text domain*) or by signing in with a third-party provider, where the provider account name becomes the domain name (e.g. a GitHub username).
+
+```typescript
+interface LynvoDomain {
+  name: string;        // Unique key: "local" | "acme" | a GitHub username | …
+  provider?: string;   // "github" | "gitlab" for third-party domains; absent for text domains
+  providerId?: string; // Provider account id (e.g. GitHub numeric id)
+  createdAt: number;   // Unix timestamp in milliseconds
+}
+```
+
+Domains are stored in `identities.json` (keyed by `name`) alongside the identities registry, so they team-sync for free.
+
+> **Deletion:** the `local` domain is a protected fallback and cannot be removed. A domain with no identities is removed outright. When a domain holds identities, the user chooses: **delete** those identities too (which unassigns their tasks), or **re-home** them onto `local` (preserving them and their assignments).
+
 ### LynvoIdentity
 
 ```typescript
 interface LynvoIdentity {
   id: string;          // Format: "id-{base36timestamp}-{random8}" — project-unique, opaque
   displayName: string; // Human-readable name shown on the board (e.g. "John", "Agent")
-  source: string;      // Origin: "github" | "gitlab" | "local" | …
-  sourceId: string;    // Provider handle or local tag (e.g. "acme", "agent-1")
+  source: string;      // Provider/kind: "local" | "github" | "gitlab"
+  sourceId: string;    // The domain the identity belongs to (e.g. "acme", or a GitHub username)
   createdAt: number;   // Unix timestamp in milliseconds
 }
 ```
 
 **Design notes:**
 - Identity is a **trust-based** project record. No encryption, no central registry.
-- The ID is project-unique and opaque; `sourceId` is the cross-referencing handle.
-- The "my identity" pointer is stored per-machine in VS Code workspace state (`lynvo.myIdentityId`), not in the JSON.
+- The ID is project-unique and opaque. `source` is the **domain provider** (`local`, `github`, `gitlab`); `sourceId` is the **domain** the identity belongs to (see `LynvoDomain`), e.g. `acme` or a GitHub username. `displayName` is the human name the user types.
+- Only the **display name** is editable in the Lynvo UI; `source` (provider) and `sourceId` (domain) are set at creation and locked.
+- The "my identity" pointer is stored per-machine in VS Code workspace state (`lynvo.activeIdentityId`), not in the JSON.
 - Display names are case-insensitively unique per project; "Unassigned" is reserved.
 - Tasks reference an identity via `assigneeId` (optional). When absent, the task is unassigned.
 
@@ -296,7 +318,7 @@ All IDs follow the pattern: `{prefix}-{base36timestamp}-{random8chars}`
 Generate them like this:
 - **Timestamp**: `Date.now().toString(36)`
 - **Random**: `Math.random().toString(36).slice(2, 10)`
-- **Prefixes**: `task`, `col`, `label`, `check`, `rel`, `activity`
+- **Prefixes**: `task`, `col`, `label`, `check`, `rel`, `activity`, `id`
 
 Examples:
 - Task: `task-m5xk2abc-d7f3g9h1`
@@ -305,16 +327,30 @@ Examples:
 - Checklist: `check-m5xk2jkl-i9j0k1l2`
 - Relation: `rel-m5xk2mno-m3n4o5p6`
 - Activity: `activity-m5xk2pqr-q7r8s9t0`
+- Identity: `id-m5xk2stu-r1s2t3u4`
 
-## Default User Identity for Agent Operations
+## Task Attribution for Agent Operations
 
-When creating or modifying tasks without GitHub authentication, use this identity:
+When creating or modifying task files directly, set `createdBy` and `lastModifiedBy` to your identity's ID from `identities.json`:
 
 ```json
-{ "githubId": "unknown", "username": "Lynvo - Agent" }
+"createdBy": "id-m5xk2stu-r1s2t3u4",
+"lastModifiedBy": "id-m5xk2stu-r1s2t3u4"
 ```
 
 This is the direct-agent attribution convention. Extension-created unauthenticated changes may use `{ "githubId": "unknown", "username": "Unknown" }`, but AI agents should prefer `Lynvo - Agent` so their direct JSON edits are recognizable.
+
+## Agents & Assignees
+
+Identities are the project's known workers — humans or generative agents. A task's `assigneeId` field references an identity's `id`; when absent, the task is unassigned.
+
+**How identities are created:**
+- A **Lynvo user** creates identities through the UI (the *Manage Identities* panel via `lynvo.openIdentities`, or the `lynvo.createIdentity` command) and then communicates the identity's **ID** to the agents. In the panel, the user first **adds a domain** (by typing a name, or by signing in to a third-party provider whose account name becomes the domain — e.g. a GitHub username), then adds identities into a chosen domain (default `local`). Creating an identity does **not** make it current: the user then chooses which identity signs (the *Active* radio in the panel, or `lynvo.setIdentity`). The *current identity* signs `createdBy`/`lastModifiedBy` (stored as its ID, `undefined` when anonymous) and the activity/presence actors for every operation performed through the extension (the legacy display shape `{ "githubId": sourceId, "username": displayName }`).
+- An **Agent-Manager** may instead create identities by editing `.vscode/lynvo/identities.json` directly (the file holds `{ identities: { … }, domains: { … } }`; add an identity under `identities` keyed by a generated `id-…` ID with `displayName`, `source` (provider: `local`/`github`/`gitlab`), `sourceId` (domain name), `createdAt`, and register the domain under `domains` if it isn't there), commit it, and pass the identity ID to the Agent-Workers.
+
+**Agent-Workers** set the task's `assigneeId` field to the identity ID they were given, e.g. `"assigneeId": "id-m5xk2stu-r1s2t3u4"`.
+
+**Caution for Agent-Managers:** do not overload `identities.json` with duplicate or near-duplicate names, and do not register one-off delegated sub-agents. An identity is a *personification* — a somewhat unique avatar that persists across the project (e.g. "John", "Build Bot", "Agent-1"), not a per-run session name.
 
 ## Field Defaults (Board Integrity)
 
@@ -327,7 +363,7 @@ The extension fills missing fields on load via `ensureBoardIntegrity()`. You can
 | `priority` | `"medium"` |
 | `checklist` | `[]` (empty array) |
 | `relations` | `[]` (empty array) |
-| `createdBy` | `{ githubId: "unknown", username: "Unknown" }` |
+| `createdBy` | unset (means anonymous) |
 | `lastModifiedBy` | copies `createdBy` |
 | `updatedAt` | copies `createdAt` |
 
@@ -348,7 +384,9 @@ If a task's `status` references a deleted column, it is reassigned to the leftmo
 | `lynvo.openLabels` | Open the labels manager webview |
 | `lynvo.openInsights` | Open the insights/metrics webview |
 | `lynvo.syncBoard` | Trigger manual shadow-branch sync |
-| `lynvo.connectGitHub` | Authenticate with GitHub for user identity |
+| `lynvo.openIdentities` | Open the Manage Identities panel (view, add, remove, rename; set current identity) |
+| `lynvo.createIdentity` | Create a new identity (local or GitHub-sourced); it does **not** become current |
+| `lynvo.setIdentity` | Make an existing identity the current one (signs `createdBy`/`lastModifiedBy`) |
 | `lynvo.installSkills` | Reinstall bundled Lynvo agent skills into supported agent locations |
 
 ### Option B: Direct JSON File Manipulation
@@ -372,14 +410,8 @@ Write to `.vscode/lynvo/tasks/{taskId}.json`:
   "title": "Implement user authentication",
   "description": "Add login/signup flow with GitHub OAuth.\n\n- [ ] Create login page\n- [ ] Add OAuth callback\n- [ ] Store session token",
   "status": "todo",
-  "createdBy": {
-    "githubId": "unknown",
-    "username": "Lynvo - Agent"
-  },
-  "lastModifiedBy": {
-    "githubId": "unknown",
-    "username": "Lynvo - Agent"
-  },
+  "createdBy": "id-{identityId}",
+  "lastModifiedBy": "id-{identityId}",
   "createdAt": 1716300000000,
   "updatedAt": 1716300000000,
   "position": 1716300000000,
@@ -662,7 +694,7 @@ General rule: non-empty beats empty when the field policy does not decide. Do no
 - Users are tracked in `users.json` with `lastSeenAt` timestamps
 - A user is considered "active" if `lastSeenAt` is within the last 5 minutes
 - Presence is updated via `touchCurrentUser()` on extension activation and every 120 seconds
-- Requires GitHub authentication to identify users
+- The identifying user is the current identity if one is set, else the GitHub auth session (legacy fallback), else the anonymous `Unknown` user
 
 ## Activity Feed
 
@@ -702,7 +734,9 @@ The extension provides 6 views accessible via the toolbar tabs:
 
 | Command | Title | Context |
 |---|---|---|
-| `lynvo.connectGitHub` | Lynvo: Connect GitHub | Activity bar menu |
+| `lynvo.openIdentities` | Lynvo: Manage Identities | Activity bar menu, Command Palette |
+| `lynvo.createIdentity` | Lynvo: Create Identity | Activity bar menu, Command Palette |
+| `lynvo.setIdentity` | Lynvo: Set Identity | Activity bar menu, Command Palette |
 | `lynvo.openBoard` | Lynvo: Open Project Board | Activity bar menu, Command Palette |
 | `lynvo.openInsights` | Lynvo: Open Insights View | Activity bar menu, Command Palette |
 | `lynvo.openTable` | Lynvo: Open Table View | Activity bar menu, Command Palette |
@@ -783,8 +817,8 @@ Before starting any multi-step work, create a planning task:
   "title": "Plan: <feature or fix name>",
   "description": "Autonomous plan generated by AI agent.\n\nEach checklist item represents a step. Items are marked [x] when completed.",
   "status": "in-progress",
-  "createdBy": { "githubId": "unknown", "username": "Lynvo - Agent" },
-  "lastModifiedBy": { "githubId": "unknown", "username": "Lynvo - Agent" },
+  "createdBy": "id-{identityId}",
+  "lastModifiedBy": "id-{identityId}",
   "createdAt": <now>,
   "updatedAt": <now>,
   "position": <now>,
@@ -844,8 +878,8 @@ For each substantial piece of work identified during planning:
   "title": "Implement <specific feature>",
   "description": "Detailed description of what this task covers.\n\n- Context about the change\n- Technical approach\n- Any relevant notes",
   "status": "todo",
-  "createdBy": { "githubId": "unknown", "username": "Lynvo - Agent" },
-  "lastModifiedBy": { "githubId": "unknown", "username": "Lynvo - Agent" },
+  "createdBy": "id-{identityId}",
+  "lastModifiedBy": "id-{identityId}",
   "createdAt": <now>,
   "updatedAt": <now>,
   "position": <now>,
