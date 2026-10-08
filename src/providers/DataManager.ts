@@ -1904,11 +1904,16 @@ export class DataManager {
     });
   }
 
-  /** Validate a display name: non-empty, not "Unassigned", not a duplicate. */
+  /**
+   * Validate a display name: non-empty, not "Unassigned", not a duplicate.
+   * A duplicate is only a duplicate within the same domain (`sourceId`),
+   * so that two "Jane" from "Company-A" and "Company-B" can coexist.
+   */
   public static validateDisplayName(
     name: string,
     identities: Record<string, LynvoIdentity>,
     excludeId?: string,
+    domain?: string,
   ): string | null {
     const trimmed = name.trim();
     if (!trimmed) {
@@ -1917,11 +1922,15 @@ export class DataManager {
     if (trimmed.toLowerCase() === "unassigned") {
       return t("Display name \"Unassigned\" is reserved.");
     }
+    const domainKey = (domain || "").trim().toLowerCase();
     const duplicate = Object.values(identities).some(
-      (id) => id.id !== excludeId && id.displayName.toLowerCase() === trimmed.toLowerCase(),
+      (id) =>
+        id.id !== excludeId &&
+        id.displayName.toLowerCase() === trimmed.toLowerCase() &&
+        (id.sourceId || "").toLowerCase() === domainKey,
     );
     if (duplicate) {
-      return t("An identity with the name \"{0}\" already exists.", trimmed);
+      return t("An identity named \"{0}\" already exists in this domain.", trimmed);
     }
     return null;
   }

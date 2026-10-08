@@ -6,6 +6,7 @@ import {
   LynvoActivity,
   LynvoBoard,
   LynvoColumn,
+  LynvoIdentity,
   LynvoLabel,
   LynvoTask,
   LynvoTaskRelationType,
@@ -204,6 +205,25 @@ const DomainIcon = () => (
     
     <line x1="22" y1="20" x2="22" y2="26" />
     <line x1="19" y1="23" x2="25" y2="23" />
+  </svg>
+);
+
+// The icon for the Identities list on the Manage Identities panel.
+const ProfileHeadIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="32"
+    height="32"
+    viewBox="0 0 32 32"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <circle cx="16" cy="11" r="6" />
+    <path d="M5 27a11 11 0 0 1 22 0" />
   </svg>
 );
 
@@ -1171,6 +1191,13 @@ export const App: React.FC = () => {
   const [identityError, setIdentityError] = useState("");
   const [editingIdentityId, setEditingIdentityId] = useState<string | null>(null);
   const [editIdentityName, setEditIdentityName] = useState("");
+  const [identitySearch, setIdentitySearch] = useState("");
+  const [identitySortKey, setIdentitySortKey] = useState<"name" | "added">("name");
+  const [identitySortAsc, setIdentitySortAsc] = useState(true);
+  // Session-only tracking of set active identities (most recent first).
+  // Intentionally in-memory: it is lost when the extension / webview restarts.
+  // Meant as a convenience when switching the active identity.
+  const [recentIdentityIds, setRecentIdentityIds] = useState<string[]>([]);
   // "Add domain" form: a domain groups identities. "local" always exists;
   // third-party domains are created by signing in with a provider (GitHub for now).
   const [showAddDomain, setShowAddDomain] = useState(false);
@@ -2188,7 +2215,7 @@ export const App: React.FC = () => {
                   .sort((a, b) => a.displayName.localeCompare(b.displayName))
                   .map((identity) => (
                     <option key={identity.id} value={identity.id}>
-                      {identity.displayName}
+                      {`${identity.displayName}@${identity.sourceId}`}
                     </option>
                   ))}
               </select>
@@ -2662,7 +2689,12 @@ export const App: React.FC = () => {
             >
               <span>
                 {task.assigneeId
-                  ? boardData?.identities?.[task.assigneeId]?.displayName || task.assigneeId
+                  ? (() => {
+                      const assignee = boardData?.identities?.[task.assigneeId];
+                      return assignee
+                        ? `${assignee.displayName}@${assignee.sourceId}`
+                        : task.assigneeId;
+                    })()
                   : t("Unassigned")}
               </span>
               <div style={{ textAlign: "right", color: "var(--vscode-descriptionForeground)" }}>
@@ -2903,8 +2935,25 @@ export const App: React.FC = () => {
   const renderIdentitiesManager = () => {
     if (!boardData) {return null;}
 
-    const identities = Object.values(boardData.identities || {})
-      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    const identitySearchTerm = identitySearch.trim().toLowerCase();
+    const unfilteredIdentities = Object.values(boardData.identities || {});
+    const filteredIdentities = unfilteredIdentities.filter(
+      (identity) =>
+        identity.displayName.toLowerCase().startsWith(identitySearchTerm)
+        ||       identity.id.toLowerCase().startsWith(identitySearchTerm),
+    );
+    const identities = 
+      (identitySearchTerm.length === 0 ? unfilteredIdentities : [...filteredIdentities])
+      .sort((a, b) => {
+        let cmp =
+          identitySortKey === "added"
+            ? a.createdAt - b.createdAt
+            : a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
+        if (cmp === 0) {
+          cmp = a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
+        }
+        return identitySortAsc ? cmp : -cmp;
+    });
     // Domains are the "source" an identity belongs to.
     // "local" always exists, even on boards that predate the domains registry.
     const domainList = Object.values(boardData.domains || {})
@@ -2916,6 +2965,43 @@ export const App: React.FC = () => {
     const assignedCountOf = (identityId: string) =>
       Object.values(boardData.tasks || {})
         .filter((task) => task.assigneeId === identityId).length;
+
+    // Pinned section: the active identity plus the ones most recently made current
+    // this session, capped to 3 lines for quick access. On startup only the active
+    // identity (or nothing) appears, because `recentIdentityIds` starts empty.
+    const pinnedIdentityIds = [
+      ...new Set<string>(
+        [activeIdentityId, ...recentIdentityIds].filter((id): id is string => Boolean(id)),
+      ),
+    ].slice(0, 3);
+    const pinnedIdentities = pinnedIdentityIds
+      .map((id) => boardData.identities?.[id])
+      .filter((identity): identity is LynvoIdentity => Boolean(identity));
+
+    // Select (or clear) the active identity; recording recency feeds the pinned section.
+    const handleActivateIdentity = (identity: LynvoIdentity) => {
+      if (identity.id === activeIdentityId) {
+        // Toggling off: clear the active identity.
+        setActiveIdentityId(undefined);
+        vscode.postMessage({ command: "setCurrentIdentity" });
+        return;
+      }
+      // Activating a new identity: carry the previously-active one into the recency
+      // history so that switching A -> B pushes A down instead of dropping it
+      // (important at startup, where only the persisted active identity is known).
+      const previousActive = activeIdentityId;
+      setActiveIdentityId(identity.id);
+      setRecentIdentityIds((prev) => {
+        const rest = prev.filter((id) => id !== identity.id);
+        if (previousActive && previousActive !== identity.id && !rest.includes(previousActive)) {
+          return [previousActive, ...rest];
+        }
+        return rest;
+      });
+      // Update optimistically so that the change shows immediately;
+      // the loadData round-trip then confirms and persists it.
+      vscode.postMessage({ command: "setCurrentIdentity", identityId: identity.id });
+    };
 
     const submitAddIdentity = () => {
       if (!newIdentityName.trim()) {
@@ -2958,14 +3044,18 @@ export const App: React.FC = () => {
       vscode.postMessage({ command: "addRemoteDomain", provider: domainProvider });
     };
 
-    const toggleAddDomain = () => {
+    // Switch the panel between the Identities list and the Domains form.
+    const showIdentities = () => {
       setIdentityError("");
-      if (showAddDomain) {
-        // Reset the form state when closing it.
-        setDomainName("");
-        setDomainInputType("text");
-      }
-      setShowAddDomain((v) => !v);
+      // Reset the domain form when leaving it.
+      setDomainName("");
+      setDomainInputType("text");
+      setShowAddDomain(false);
+    };
+    const showDomains = () => {
+      setIdentityError("");
+      setDomainInputType("text");
+      setShowAddDomain(true);
     };
 
     // Shared per-column layout so that the header and each row stay aligned.
@@ -2992,8 +3082,17 @@ export const App: React.FC = () => {
       cursor: "pointer",
     });
 
+    // Segmented "view" buttons in the header (Identities | Domains).
+    const segmentButtonStyle = (active: boolean): React.CSSProperties => ({
+      ...iconButtonStyle,
+      border: `1px solid ${active ? "var(--vscode-button-border, var(--vscode-widget-border))" : "var(--vscode-widget-border)"}`,
+      backgroundColor: active ? "var(--vscode-button-background)" : "transparent",
+      color: active ? "var(--vscode-button-foreground)" : "inherit",
+      cursor: "pointer",
+    });
+
     return (
-      <div>
+      <div style={{ display: "flex", flexDirection: "column", minHeight: "0" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "8px" }}>
           <div>
             <h2 style={{ margin: 0 }}>{t("Identities")}</h2>
@@ -3001,17 +3100,68 @@ export const App: React.FC = () => {
               {t("Identities are the people or agents that can be assigned to tasks and that sign your changes.")}
             </div>
           </div>
+          <div style={{ display: "flex", gap: "6px" }}>
+            <button
+              type="button"
+              title={t("Identities")}
+              aria-label={t("Identities")}
+              aria-pressed={!showAddDomain}
+              onClick={showIdentities}
+              style={segmentButtonStyle(!showAddDomain)}
+            >
+              <ProfileHeadIcon />
+            </button>
+            <button
+              type="button"
+              title={t("Manage domains")}
+              aria-label={t("Manage domains")}
+              aria-pressed={showAddDomain}
+              onClick={showDomains}
+              style={segmentButtonStyle(showAddDomain)}
+            >
+              <DomainIcon />
+            </button>
+          </div>
+        </div>
+
+        {!showAddDomain && (
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "12px", flexWrap: "wrap" }}>
+          <input
+            value={identitySearch}
+            onChange={(e) => setIdentitySearch(e.target.value)}
+            placeholder={t("Search identities...")}
+            style={{ flex: 1, minWidth: "160px", padding: "5px" }}
+            aria-label={t("Search identities")}
+          />
+          <select
+            value={identitySortKey}
+            onChange={(e) => setIdentitySortKey(e.target.value as "name" | "added")}
+            style={{ padding: "4px" }}
+            aria-label={t("Sort identities by")}
+          >
+            <option value="name">{t("Name")}</option>
+            <option value="added">{t("Added date")}</option>
+          </select>
           <button
             type="button"
             className="icon-btn"
             style={iconButtonStyle}
-            title={showAddDomain ? t("Cancel") : t("Add domain")}
-            aria-label={showAddDomain ? t("Cancel") : t("Add domain")}
-            onClick={toggleAddDomain}
+            onClick={() => setIdentitySortAsc((value) => !value)}
+            title={
+              identitySortKey === "added"
+                ? identitySortAsc
+                  ? t("Oldest first")
+                  : t("Newest first")
+                : identitySortAsc
+                  ? t("Sort: A to Z")
+                  : t("Sort: Z to A")
+            }
+            aria-label={t("Toggle identity sort order")}
           >
-            {showAddDomain ? <span aria-hidden="true">×</span> : <DomainIcon />}
+            <SortIcon direction={identitySortAsc ? "asc" : "desc"} />
           </button>
         </div>
+        )}
 
         {showAddDomain && (
           <div style={{ backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "12px", borderRadius: "8px", marginBottom: "16px" }}>
@@ -3099,9 +3249,72 @@ export const App: React.FC = () => {
           </div>
         )}
 
+        {!showAddDomain && (
+          <div style={{ marginBottom: "16px" }}>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--vscode-descriptionForeground)", marginBottom: "6px" }}>
+              {t("Recently active")}
+            </div>
+            {activeIdentityId ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                {pinnedIdentities.map((identity) => {
+                  const isCurrent = identity.id === activeIdentityId;
+                  return (
+                    <button
+                      key={identity.id}
+                      type="button"
+                      onClick={() => handleActivateIdentity(identity)}
+                      title={isCurrent ? t("Clear current") : t("Set as current")}
+                      aria-label={`${isCurrent ? t("Clear current") : t("Set as current")}: ${identity.displayName}`}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        width: "100%",
+                        padding: "6px 10px",
+                        borderRadius: "6px",
+                        border: `1px solid ${isCurrent ? "var(--vscode-focusBorder)" : "var(--vscode-widget-border)"}`,
+                        backgroundColor: "transparent",
+                        color: "inherit",
+                        cursor: "pointer",
+                        textAlign: "left",
+                      }}
+                    >
+                      <span style={{ fontWeight: 700, fontSize: "13px" }}>{identity.displayName}</span>
+                      <span style={{ fontSize: "11px", color: "var(--vscode-descriptionForeground)" }}>
+                        {identity.sourceId}
+                      </span>
+                      {isCurrent && (
+                        <span
+                          style={{
+                            marginLeft: "auto",
+                            fontSize: "10px",
+                            fontWeight: 700,
+                            padding: "1px 8px",
+                            borderRadius: "10px",
+                            border: "1px solid var(--vscode-focusBorder)",
+                            color: "var(--vscode-focusBorder)",
+                          }}
+                        >
+                          {t("Active")}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ fontSize: "12px", color: "var(--vscode-descriptionForeground)" }}>
+                {t("No currently active identity — your edits are signed as anonymous.")}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!showAddDomain && (
         <div
           style={{
-            maxHeight: "58vh",
+            flex: "1 1 auto",
+            minHeight: "0",
             overflowY: "auto",
             overflowX: "auto",
             border: "1px solid var(--vscode-widget-border)",
@@ -3162,21 +3375,17 @@ export const App: React.FC = () => {
                 {/* Usage: number of tasks assigned to this identity. */}
                 <div style={{ ...colUsage, textAlign: "right", fontSize: "12px" }}>{assignedCountOf(identity.id)}</div>
 
-                {/* Active: a single radio to pick the identity that signs changes. */}
+                {/* Active: a single radio to pick the identity that signs changes.
+                    Clicking the already-selected radio clears the active identity. */}
                 <div style={{ ...colActive, textAlign: "center" }}>
                   <input
                     type="radio"
                     name="activeIdentity"
                     value={identity.id}
                     checked={isCurrent}
-                    onChange={() => {
-                      // Update optimistically so that the selection shows immediately;
-                      // the loadData round-trip then confirms and persists it.
-                      setActiveIdentityId(identity.id);
-                      vscode.postMessage({ command: "setCurrentIdentity", identityId: identity.id });
-                    }}
-                    title={t("Set as current")}
-                    aria-label={`${t("Set as current")}: ${identity.displayName}`}
+                    onClick={() => handleActivateIdentity(identity)}
+                    title={isCurrent ? t("Clear current") : t("Set as current")}
+                    aria-label={`${isCurrent ? t("Clear current") : t("Set as current")}: ${identity.displayName}`}
                   />
                 </div>
 
@@ -3202,7 +3411,9 @@ export const App: React.FC = () => {
 
           {identities.length === 0 && (
             <div style={{ padding: "20px", textAlign: "center", color: "var(--vscode-descriptionForeground)", fontSize: "13px" }}>
-              {t("No identities yet. Add one below.")}
+              {Object.keys(boardData.identities || {}).length > 0
+                ? t("No matching identities.")
+                : t("No identities yet. Add one below.")}
             </div>
           )}
 
@@ -3249,6 +3460,7 @@ export const App: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
       </div>
     );
   };

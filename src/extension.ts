@@ -578,10 +578,10 @@ export function activate(context: vscode.ExtensionContext) {
           break;
       }
 
-      // 2. Validate against existing identities (duplicate check).
+      // 2. Validate against existing identities (duplicate check within the chosen domain).
       const board = await DataManager.loadBoard();
       const identities = board?.identities || {};
-      const error = DataManager.validateDisplayName(displayName, identities);
+      const error = DataManager.validateDisplayName(displayName, identities, undefined, sourceId);
       if (error) {
         vscode.window.showErrorMessage(error);
         return;

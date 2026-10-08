@@ -698,7 +698,7 @@ export class LynvoPanel {
             const sourceId = asString(message.sourceId) || "";
             const board = await DataManager.loadBoard();
             const identities = board?.identities || {};
-            const error = DataManager.validateDisplayName(displayName, identities);
+            const error = DataManager.validateDisplayName(displayName, identities, undefined, sourceId);
             if (error) {
               webview.postMessage({ command: "identityResult", success: false, error });
               return;
@@ -815,7 +815,13 @@ export class LynvoPanel {
             }
             const board = await DataManager.loadBoard();
             const identities = board?.identities || {};
-            const error = DataManager.validateDisplayName(displayName, identities, identityId);
+            // Duplicate check is scoped to the identity's own domain.
+            const error = DataManager.validateDisplayName(
+              displayName,
+              identities,
+              identityId,
+              identities[identityId]?.sourceId,
+            );
             if (error) {
               webview.postMessage({ command: "identityResult", success: false, error });
               return;
