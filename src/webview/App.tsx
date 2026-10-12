@@ -80,7 +80,7 @@ type WebviewOutboundMessage =
   | { command: "convertBrokenTask"; taskId: string }
   | { command: "removeCodeRefsForColumn"; colId: string }
   | { command: "assignTask"; taskId: string; identityId?: string }
-  | { command: "addIdentity"; displayName: string; source: string; sourceId: string }
+  | { command: "addIdentity"; displayName: string; source: string; sourceId: string; setActive?: boolean }
   | { command: "addLocalDomain"; name: string }
   | { command: "removeDomain"; name: string }
   | { command: "addRemoteDomain"; provider: string }
@@ -1188,11 +1188,13 @@ export const App: React.FC = () => {
   const [newIdentityName, setNewIdentityName] = useState("");
   const [newIdentitySource, setNewIdentitySource] = useState("local");
   const [newIdentityDomain, setNewIdentityDomain] = useState("local");
+  // Whether the newly-created identity should become the active one right away.
+  const [newIdentitySetActive, setNewIdentitySetActive] = useState(false);
   const [identityError, setIdentityError] = useState("");
   const [editingIdentityId, setEditingIdentityId] = useState<string | null>(null);
   const [editIdentityName, setEditIdentityName] = useState("");
   const [identitySearch, setIdentitySearch] = useState("");
-  const [identitySortKey, setIdentitySortKey] = useState<"name" | "added">("name");
+  const [identitySortKey, setIdentitySortKey] = useState<"name" | "added" | "recent">("name");
   const [identitySortAsc, setIdentitySortAsc] = useState(true);
   // Session-only tracking of set active identities (most recent first).
   // Intentionally in-memory: it is lost when the extension / webview restarts.
@@ -1354,6 +1356,7 @@ export const App: React.FC = () => {
           setNewIdentityName("");
           setNewIdentitySource("local");
           setNewIdentityDomain("local");
+          setNewIdentitySetActive(false);
           setEditingIdentityId(null);
         }
       }
@@ -2942,13 +2945,25 @@ export const App: React.FC = () => {
         identity.displayName.toLowerCase().startsWith(identitySearchTerm)
         ||       identity.id.toLowerCase().startsWith(identitySearchTerm),
     );
+    // Rank for the "recently active" sort: the current active identity is rank 0,
+    // then the ones most recently made current this session (recency history);
+    // identities never activated this session rank last.
+    const recentRank = (id: string): number => {
+      if (id === activeIdentityId) {return 0;}
+      const idx = recentIdentityIds.indexOf(id);
+      return idx === -1 ? Number.MAX_SAFE_INTEGER : idx + 1;
+    };
     const identities = 
       (identitySearchTerm.length === 0 ? unfilteredIdentities : [...filteredIdentities])
       .sort((a, b) => {
-        let cmp =
-          identitySortKey === "added"
-            ? a.createdAt - b.createdAt
-            : a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
+        let cmp;
+        if (identitySortKey === "added") {
+          cmp = a.createdAt - b.createdAt;
+        } else if (identitySortKey === "recent") {
+          cmp = recentRank(a.id) - recentRank(b.id);
+        } else {
+          cmp = a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
+        }
         if (cmp === 0) {
           cmp = a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
         }
@@ -2966,19 +2981,7 @@ export const App: React.FC = () => {
       Object.values(boardData.tasks || {})
         .filter((task) => task.assigneeId === identityId).length;
 
-    // Pinned section: the active identity plus the ones most recently made current
-    // this session, capped to 3 lines for quick access. On startup only the active
-    // identity (or nothing) appears, because `recentIdentityIds` starts empty.
-    const pinnedIdentityIds = [
-      ...new Set<string>(
-        [activeIdentityId, ...recentIdentityIds].filter((id): id is string => Boolean(id)),
-      ),
-    ].slice(0, 3);
-    const pinnedIdentities = pinnedIdentityIds
-      .map((id) => boardData.identities?.[id])
-      .filter((identity): identity is LynvoIdentity => Boolean(identity));
-
-    // Select (or clear) the active identity; recording recency feeds the pinned section.
+    // Select (or clear) the active identity; recording recency feeds the "recently active" sort.
     const handleActivateIdentity = (identity: LynvoIdentity) => {
       if (identity.id === activeIdentityId) {
         // Toggling off: clear the active identity.
@@ -3018,6 +3021,7 @@ export const App: React.FC = () => {
         displayName: newIdentityName.trim(),
         source: newIdentitySource,
         sourceId: newIdentityDomain,
+        setActive: newIdentitySetActive,
       });
       setNewIdentityName("");
     };
@@ -3098,6 +3102,7 @@ export const App: React.FC = () => {
             <h2 style={{ margin: 0 }}>{t("Identities")}</h2>
             <div style={{ fontSize: "11px", color: "var(--vscode-descriptionForeground)" }}>
               {t("Identities are the people or agents that can be assigned to tasks and that sign your changes.")}
+              {!activeIdentityId && ` ${t("No currently active identity — your edits are signed as anonymous.")}`}
             </div>
           </div>
           <div style={{ display: "flex", gap: "6px" }}>
@@ -3141,6 +3146,7 @@ export const App: React.FC = () => {
           >
             <option value="name">{t("Name")}</option>
             <option value="added">{t("Added date")}</option>
+            <option value="recent">{t("Recently active")}</option>
           </select>
           <button
             type="button"
@@ -3152,9 +3158,13 @@ export const App: React.FC = () => {
                 ? identitySortAsc
                   ? t("Oldest first")
                   : t("Newest first")
-                : identitySortAsc
-                  ? t("Sort: A to Z")
-                  : t("Sort: Z to A")
+                : identitySortKey === "recent"
+                  ? identitySortAsc
+                    ? t("Most recently active first")
+                    : t("Least recently active first")
+                  : identitySortAsc
+                    ? t("Sort: A to Z")
+                    : t("Sort: Z to A")
             }
             aria-label={t("Toggle identity sort order")}
           >
@@ -3246,67 +3256,6 @@ export const App: React.FC = () => {
         {identityError && (
           <div style={{ backgroundColor: "var(--vscode-inputValidation-errorBackground, #5a1d1d)", color: "var(--vscode-inputValidation-errorForeground, #f77)", padding: "8px 10px", borderRadius: "6px", marginBottom: "12px", fontSize: "12px" }}>
             {identityError}
-          </div>
-        )}
-
-        {!showAddDomain && (
-          <div style={{ marginBottom: "16px" }}>
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--vscode-descriptionForeground)", marginBottom: "6px" }}>
-              {t("Recently active")}
-            </div>
-            {activeIdentityId ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                {pinnedIdentities.map((identity) => {
-                  const isCurrent = identity.id === activeIdentityId;
-                  return (
-                    <button
-                      key={identity.id}
-                      type="button"
-                      onClick={() => handleActivateIdentity(identity)}
-                      title={isCurrent ? t("Clear current") : t("Set as current")}
-                      aria-label={`${isCurrent ? t("Clear current") : t("Set as current")}: ${identity.displayName}`}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        width: "100%",
-                        padding: "6px 10px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isCurrent ? "var(--vscode-focusBorder)" : "var(--vscode-widget-border)"}`,
-                        backgroundColor: "transparent",
-                        color: "inherit",
-                        cursor: "pointer",
-                        textAlign: "left",
-                      }}
-                    >
-                      <span style={{ fontWeight: 700, fontSize: "13px" }}>{identity.displayName}</span>
-                      <span style={{ fontSize: "11px", color: "var(--vscode-descriptionForeground)" }}>
-                        {identity.sourceId}
-                      </span>
-                      {isCurrent && (
-                        <span
-                          style={{
-                            marginLeft: "auto",
-                            fontSize: "10px",
-                            fontWeight: 700,
-                            padding: "1px 8px",
-                            borderRadius: "10px",
-                            border: "1px solid var(--vscode-focusBorder)",
-                            color: "var(--vscode-focusBorder)",
-                          }}
-                        >
-                          {t("Active")}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <div style={{ fontSize: "12px", color: "var(--vscode-descriptionForeground)" }}>
-                {t("No currently active identity — your edits are signed as anonymous.")}
-              </div>
-            )}
           </div>
         )}
 
@@ -3417,8 +3366,8 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {/* Creation row — always the last line. */}
-          <div style={{ ...row, borderTop: identities.length > 0 ? "1px solid var(--vscode-widget-border)" : "none" }}>
+          {/* Creation row - pinned to the bottom of the table (sticky), as to be always accessible. */}
+          <div style={{ ...row, position: "sticky", bottom: 0, zIndex: 1, backgroundColor: "var(--vscode-editor-background)", borderTop: identities.length > 0 ? "1px solid var(--vscode-widget-border)" : "none" }}>
             <div style={colName}>
               <input
                 placeholder={t("Display name (shown on the board)")}
@@ -3454,7 +3403,16 @@ export const App: React.FC = () => {
               </select>
             </div>
             <div style={colUsage} />
-            <div style={colActive} />
+            <div style={{ ...colActive, textAlign: "center" }}>
+              <input
+                type="radio"
+                title={t("Set as active after creation")}
+                aria-label={t("Set as active after creation")}
+                aria-pressed={newIdentitySetActive}
+                checked={newIdentitySetActive}
+                onClick={() => setNewIdentitySetActive((value) => !value)}
+              />
+            </div>
             <div style={{ ...colActions, display: "flex", justifyContent: "flex-end" }}>
               <button type="button" className="icon-btn" style={iconButtonStyle} onClick={submitAddIdentity} disabled={!newIdentityName.trim()} title={t("Add identity")} aria-label={t("Add identity")}><PlusIcon /></button>
             </div>

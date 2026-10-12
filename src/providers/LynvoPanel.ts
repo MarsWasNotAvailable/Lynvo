@@ -711,7 +711,12 @@ export class LynvoPanel {
               });
               return;
             }
-            await DataManager.createIdentity(displayName, source, sourceId);
+            const identity = await DataManager.createIdentity(displayName, source, sourceId);
+            // Optionally make the newly-created identity the active one right away.
+            if (message.setActive === true) {
+              DataManager.setActiveIdentityId(identity.id);
+              await LynvoPanel.persistIdentity(identity.id);
+            }
             LynvoPanel.refreshDataAndScheduleSync();
             webview.postMessage({ command: "identityResult", success: true });
             return;
