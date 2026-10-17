@@ -313,5 +313,22 @@
   "Remove domain \"{0}\"? It contains {1} identity(ies).": "Domain \"{0}\" entfernen? Sie enthält {1} Identität(en).",
   "Delete, including identities": "Löschen, einschließlich Identitäten",
   "Delete, keep identities local": "Löschen, Identitäten lokal behalten",
-  "The \"local\" domain cannot be removed.": "Die Domain \"local\" kann nicht entfernt werden."
+  "The \"local\" domain cannot be removed.": "Die Domain \"local\" kann nicht entfernt werden.",
+  "Skills": "Fähigkeiten",
+  "{0} Set": "{0} gewählt",
+  "Select skills": "Fähigkeiten auswählen",
+  "All-Trade": "Vielseitig",
+  "All-Trade (can work on all type of tasks)": "Vielseitig (kann alle Arten von Aufgaben übernehmen)",
+  "Select the skills for {0}": "Fähigkeiten für {0} auswählen",
+  "{0} users": "{0} Benutzer",
+  "Workforce spread": "Teamverteilung",
+  "How labelized tasks compare with labelized identities (skills).": "Vergleich von Tasks mit Labels und Identitäten mit Fähigkeiten.",
+  "Tasks by label": "Tasks nach Label",
+  "Identities by skill": "Identitäten nach Fähigkeit",
+  "No labelized tasks.": "Keine Tasks mit Labels.",
+  "No labelized identities.": "Keine Identitäten mit Fähigkeiten.",
+  "One or more skills are not a known label.": "Eine oder mehrere Fähigkeiten sind kein bekanntes Label.",
+  "{0} identities": "{0} Identitäten",
+  "Ratio (tasks : skills)": "Verhältnis (Tasks : Fähigkeiten)",
+  "No labelized tasks or identities.": "Keine Tasks oder Identitäten mit Labels."
 }

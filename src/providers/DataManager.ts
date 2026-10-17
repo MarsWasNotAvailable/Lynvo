@@ -1860,6 +1860,35 @@ export class DataManager {
     });
   }
 
+  /**
+   * Set an identity's skills: a list of label ids,
+   * optionally including the reserved {@link ALL_TRADE_SKILL} token (type.ts).
+   * Pass an empty array to clear them.
+   * Skills are trimmed, de-duplicated and stored in the given order;
+   * an empty result omits the `skills` field so the JSON stays clean.
+   */
+  public static async setIdentitySkills(
+    identityId: string,
+    skills: string[],
+  ): Promise<void> {
+    const normalized = Array.from(
+      new Set(
+        (skills || [])
+          .map((skill) => (skill || "").trim())
+          .filter((skill) => skill.length > 0),
+      ),
+    );
+    await this.mutateBoard(async (board) => {
+      const identity = board.identities?.[identityId];
+      if (!identity) {return;}
+      if (normalized.length === 0) {
+        delete identity.skills;
+      } else {
+        identity.skills = normalized;
+      }
+    });
+  }
+
   /** Remove an identity, clear any task assignments pointing to it, and clear the pointer if it was current. */
   public static async removeIdentity(identityId: string): Promise<void> {
     await this.mutateBoard(async (board) => {

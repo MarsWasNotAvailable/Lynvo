@@ -313,5 +313,22 @@
   "Remove domain \"{0}\"? It contains {1} identity(ies).": "Rimuovere il dominio \"{0}\"? Contiene {1} identità.",
   "Delete, including identities": "Elimina, incluse le identità",
   "Delete, keep identities local": "Elimina, mantieni identità in locale",
-  "The \"local\" domain cannot be removed.": "Il dominio \"local\" non può essere rimosso."
+  "The \"local\" domain cannot be removed.": "Il dominio \"local\" non può essere rimosso.",
+  "Skills": "Competenze",
+  "{0} Set": "{0} scelta",
+  "Select skills": "Seleziona competenze",
+  "All-Trade": "Tuttofare",
+  "All-Trade (can work on all type of tasks)": "Tuttofare (può lavorare su ogni tipo di compito)",
+  "Select the skills for {0}": "Seleziona le competenze per {0}",
+  "{0} users": "{0} utenti",
+  "Workforce spread": "Distribuzione del team",
+  "How labelized tasks compare with labelized identities (skills).": "Confronto tra task con etichette e identità con competenze.",
+  "Tasks by label": "Task per etichetta",
+  "Identities by skill": "Identità per competenza",
+  "No labelized tasks.": "Nessun task con etichette.",
+  "No labelized identities.": "Nessuna identità con competenze.",
+  "One or more skills are not a known label.": "Una o più competenze non sono un'etichetta nota.",
+  "{0} identities": "{0} identità",
+  "Ratio (tasks : skills)": "Rapporto (task : competenze)",
+  "No labelized tasks or identities.": "Nessun task o identità con etichette."
 }

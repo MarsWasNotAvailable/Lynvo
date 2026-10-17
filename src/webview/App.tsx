@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { setWebviewLanguage, t } from "./i18n";
 import type { l10nJsonFormat } from "@vscode/l10n";
 import {
+  ALL_TRADE_SKILL,
   LynvoActivity,
   LynvoBoard,
   LynvoColumn,
@@ -86,6 +87,7 @@ type WebviewOutboundMessage =
   | { command: "addRemoteDomain"; provider: string }
   | { command: "editIdentityName"; identityId: string; displayName: string }
   | { command: "removeIdentity"; identityId: string }
+  | { command: "setIdentitySkills"; identityId: string; skills: string[] }
   | { command: "setCurrentIdentity"; identityId?: string };
 
 declare const acquireVsCodeApi: () => {
@@ -1193,6 +1195,9 @@ export const App: React.FC = () => {
   const [identityError, setIdentityError] = useState("");
   const [editingIdentityId, setEditingIdentityId] = useState<string | null>(null);
   const [editIdentityName, setEditIdentityName] = useState("");
+  // Skills editor popup: which identity's skills are being edited, and the draft set.
+  const [skillsEditorIdentityId, setSkillsEditorIdentityId] = useState<string | null>(null);
+  const [draftSkills, setDraftSkills] = useState<string[]>([]);
   const [identitySearch, setIdentitySearch] = useState("");
   const [identitySortKey, setIdentitySortKey] = useState<"name" | "added" | "recent">("name");
   const [identitySortAsc, setIdentitySortAsc] = useState(true);
@@ -1468,6 +1473,20 @@ export const App: React.FC = () => {
     for (const task of Object.values(boardData?.tasks || {})) {
       for (const id of task.labelIds || []) {
         counts[id] = (counts[id] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [boardData]);
+
+  // How many identities carry each label as a skill (by label id);
+  // the reserved All-Trade token is excluded (it is not a label).
+  // Powers the labels panel "N users" usage and the Insights skills tube.
+  const identitySkillUsage = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const identity of Object.values(boardData?.identities || {})) {
+      for (const skill of identity.skills || []) {
+        if (skill === ALL_TRADE_SKILL) {continue;}
+        counts[skill] = (counts[skill] || 0) + 1;
       }
     }
     return counts;
@@ -2872,7 +2891,7 @@ export const App: React.FC = () => {
                     />
                     <span style={{ flex: 1 }}>{label.name}</span>
                     <span style={{ fontSize: "11px", color: "var(--vscode-descriptionForeground)", whiteSpace: "nowrap" }}>
-                      {t("{0} tasks", usageOf(label.id))}
+                      {t("{0} tasks", usageOf(label.id))} · {t("{0} users", identitySkillUsage[label.id] || 0)}
                     </span>
                     <button className="icon-btn" style={iconButtonStyle} onClick={() => startEditingLabel(label)} title={t("Edit")} aria-label={t("Edit")}><EditIcon /></button>
                     <button
@@ -3068,6 +3087,7 @@ export const App: React.FC = () => {
     const colSource: React.CSSProperties = { flex: "0 0 84px" };
     const colDomain: React.CSSProperties = { flex: "2 1 130px", minWidth: "130px" };
     const colUsage: React.CSSProperties = { flex: "0 0 56px" };
+    const colSkills: React.CSSProperties = { flex: "0 0 84px", textAlign: "center" };
     const colActive: React.CSSProperties = { flex: "0 0 52px" };
     const colActions: React.CSSProperties = { flex: "0 0 78px" };
     const row: React.CSSProperties = {
@@ -3094,6 +3114,104 @@ export const App: React.FC = () => {
       color: active ? "var(--vscode-button-foreground)" : "inherit",
       cursor: "pointer",
     });
+
+    // Skills editor popup, shown as a full-width row,
+    // under the identity whose skills are being edited.
+    // Lists the existing labels as toggle bubbles, plus
+    // the baked-in All-Trade skill, then Save / Cancel.
+    const renderSkillsEditor = (identity: LynvoIdentity) => {
+      const allLabels = boardData?.labels ? Object.values(boardData.labels) : [];
+      const allTradeSelected = draftSkills.includes(ALL_TRADE_SKILL);
+      // All-Trade is mutually exclusive with the individual label skills:
+      // selecting it unsets them (a worker is either a generalist, or lists
+      // specific skills). While All-Trade is on, the label bubbles are disabled
+      // (greyed out), so turn it off (or Clear) to pick specific skills.
+      const toggleSkill = (skillId: string) => {
+        if (skillId === ALL_TRADE_SKILL) {
+          // On: it supersedes specific skills. Off: just drop the token.
+          setDraftSkills(allTradeSelected
+            ? draftSkills.filter((id) => id !== ALL_TRADE_SKILL)
+            : [ALL_TRADE_SKILL]);
+          return;
+        }
+        if (allTradeSelected) {
+          return; // Label bubbles are disabled while All-Trade is selected.
+        }
+        setDraftSkills((current) =>
+          current.includes(skillId)
+            ? current.filter((id) => id !== skillId)
+            : [...current, skillId],
+        );
+      };
+      const clearSkills = () => setDraftSkills([]);
+      const saveSkills = () => {
+        vscode.postMessage({
+          command: "setIdentitySkills",
+          identityId: identity.id,
+          skills: draftSkills,
+        });
+        setSkillsEditorIdentityId(null);
+      };
+      const cancelSkills = () => setSkillsEditorIdentityId(null);
+
+      return (
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--vscode-widget-border)", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)" }}>
+          <div style={{ fontSize: "12px", marginBottom: "8px", color: "var(--vscode-descriptionForeground)" }}>
+            {t("Select the skills for {0}", identity.displayName)}
+          </div>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center", marginBottom: "12px" }}>
+            {allLabels.map((label) => {
+              const isSelected = draftSkills.includes(label.id);
+              const dimmed = allTradeSelected;
+              return (
+                <span
+                  key={label.id}
+                  onClick={dimmed ? undefined : () => toggleSkill(label.id)}
+                  aria-disabled={dimmed}
+                  style={{
+                    padding: "2px 8px",
+                    borderRadius: "10px",
+                    fontSize: "11px",
+                    cursor: dimmed ? "default" : "pointer",
+                    opacity: dimmed ? 0.45 : 1,
+                    backgroundColor: isSelected && !dimmed ? label.color : "transparent",
+                    color: isSelected && !dimmed
+                      ? getReadableTextColor(label.color)
+                      : dimmed
+                        ? "var(--vscode-disabledForeground, var(--vscode-descriptionForeground))"
+                        : label.color,
+                    border: `1px solid ${dimmed ? "var(--vscode-disabledForeground, var(--vscode-widget-border))" : label.color}`,
+                  }}
+                >
+                  {label.name}
+                </span>
+              );
+            })}
+            {/* Baked-in All-Trade skill (not a label): a do-it-all worker. */}
+            <span
+              onClick={() => toggleSkill(ALL_TRADE_SKILL)}
+              style={{
+                padding: "2px 8px",
+                borderRadius: "10px",
+                fontSize: "11px",
+                cursor: "pointer",
+                backgroundColor: allTradeSelected ? "var(--vscode-charts-yellow, #d4a017)" : "transparent",
+                color: allTradeSelected ? "#0d1117" : "var(--vscode-foreground)",
+                border: `1px dashed var(--vscode-charts-yellow, #d4a017)`,
+              }}
+              title={t("All-Trade (can work on all type of tasks)")}
+            >
+              {t("All-Trade")}
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button onClick={clearSkills} style={{ padding: "4px 12px" }}>{t("Clear")}</button>
+            <button onClick={saveSkills} style={{ padding: "4px 12px" }}>{t("Save")}</button>
+            <button onClick={cancelSkills} style={{ padding: "4px 12px" }}>{t("Cancel")}</button>
+          </div>
+        </div>
+      );
+    };
 
     return (
       <div style={{ display: "flex", flexDirection: "column", minHeight: "0" }}>
@@ -3277,6 +3395,7 @@ export const App: React.FC = () => {
             <div style={colSource}>{t("Source")}</div>
             <div style={colDomain}>{t("Domain")}</div>
             <div style={{ ...colUsage, textAlign: "right" }}>{t("Usage")}</div>
+            <div style={colSkills}>{t("Skills")}</div>
             <div style={{ ...colActive, textAlign: "center" }}>{t("Active")}</div>
             <div style={colActions} />
           </div>
@@ -3284,10 +3403,12 @@ export const App: React.FC = () => {
           {identities.map((identity) => {
             const isCurrent = identity.id === activeIdentityId;
             const isEditing = editingIdentityId === identity.id;
+            const isSkillsOpen = skillsEditorIdentityId === identity.id;
+            const skillCount = identity.skills?.length || 0;
             return (
+              <React.Fragment key={identity.id}>
               <div
-                key={identity.id}
-                style={{ ...row, borderBottom: "1px solid var(--vscode-widget-border)", backgroundColor: isCurrent ? "var(--vscode-list-activeSelectionBackground, transparent)" : "transparent" }}
+                style={{ ...row, borderBottom: isSkillsOpen ? "none" : "1px solid var(--vscode-widget-border)", backgroundColor: isCurrent ? "var(--vscode-list-activeSelectionBackground, transparent)" : "transparent" }}
               >
                 {/* Name :
                     Only the display name is editable (sourceId is locked, especially for remote domains).
@@ -3324,6 +3445,32 @@ export const App: React.FC = () => {
                 {/* Usage: number of tasks assigned to this identity. */}
                 <div style={{ ...colUsage, textAlign: "right", fontSize: "12px" }}>{assignedCountOf(identity.id)}</div>
 
+                {/* Skills: labels the identity can work on, plus the All-Trade token. */}
+                <div style={{ ...colSkills, textAlign: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSkillsEditorIdentityId(identity.id);
+                      setDraftSkills(identity.skills || []);
+                      setIdentityError("");
+                    }}
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: "10px",
+                      fontSize: "11px",
+                      whiteSpace: "nowrap",
+                      cursor: "pointer",
+                      border: "1px solid var(--vscode-widget-border)",
+                      backgroundColor: skillCount > 0 ? "var(--vscode-editor-inactiveSelectionBackground)" : "transparent",
+                      color: "inherit",
+                    }}
+                    title={t("Select skills")}
+                    aria-label={`${t("Skills")}: ${identity.displayName}`}
+                  >
+                    {skillCount > 0 ? t("{0} Set", skillCount) : t("Add")}
+                  </button>
+                </div>
+
                 {/* Active: a single radio to pick the identity that signs changes.
                     Clicking the already-selected radio clears the active identity. */}
                 <div style={{ ...colActive, textAlign: "center" }}>
@@ -3355,6 +3502,8 @@ export const App: React.FC = () => {
                   )}
                 </div>
               </div>
+              {isSkillsOpen && renderSkillsEditor(identity)}
+              </React.Fragment>
             );
           })}
 
@@ -3403,6 +3552,7 @@ export const App: React.FC = () => {
               </select>
             </div>
             <div style={colUsage} />
+            <div style={colSkills} />
             <div style={{ ...colActive, textAlign: "center" }}>
               <input
                 type="radio"
@@ -3444,6 +3594,168 @@ export const App: React.FC = () => {
       { low: 0, medium: 0, high: 0 } as Record<Priority, number>,
     );
 
+    // Workforce spread: how labelized tasks compare with labelized identities (skills).
+    // Labels are sorted by name so the two tubes stay parallel (same label, same slot).
+    const workforceLabels = Object.values(boardData.labels || {}).sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+    );
+    const allLabelIds = new Set(workforceLabels.map((label) => label.id));
+    const identities = Object.values(boardData.identities || {});
+    const identityCount = identities.length;
+    const allTradeIdentityCount = identities.filter((identity) =>
+      (identity.skills || []).includes(ALL_TRADE_SKILL),
+    ).length;
+
+    // Fractional "skill points" per label (FTE model).
+    // An identity is one worker;
+    // its capacity is split equally across the skills that it covers.
+    // A specialist splits across its listed skills;
+    // an All-Trade identity (generalist) splits across every label,
+    // so it reports as a fraction on each.
+    const skillPoints: Record<string, number> = {};
+    identities.forEach((identity) => {
+      const skills = (identity.skills || []).filter((skill) => skill !== ALL_TRADE_SKILL);
+      if ((identity.skills || []).includes(ALL_TRADE_SKILL)) {
+        if (allLabelIds.size > 0) {
+          const per = 1 / allLabelIds.size;
+          workforceLabels.forEach((label) => {
+            skillPoints[label.id] = (skillPoints[label.id] || 0) + per;
+          });
+        }
+      } else if (skills.length > 0) {
+        const per = 1 / skills.length;
+        skills.forEach((skill) => {
+          if (allLabelIds.has(skill)) {
+            skillPoints[skill] = (skillPoints[skill] || 0) + per;
+          }
+        });
+      }
+    });
+
+    // Demand (tasks) vs supply (skill points), per label, for the ratio row.
+    const workforceRatios = workforceLabels
+      .map((label) => ({
+        label,
+        tasks: labelUsage[label.id] || 0,
+        points: skillPoints[label.id] || 0,
+      }))
+      .filter((ratio) => ratio.tasks > 0 || ratio.points > 0);
+
+    const formatPoints = (value: number): string =>
+      Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
+
+    type WorkforceSegment = { key: string; name: string; value: number; color: string };
+    const taskSegments: WorkforceSegment[] = workforceLabels
+      .map((label) => ({
+        key: label.id,
+        name: label.name,
+        value: labelUsage[label.id] || 0,
+        color: label.color,
+      }))
+      .filter((segment) => segment.value > 0);
+    // The "by skill" tube shows raw skill claims; All-Trade is its own segment.
+    const identitySegments: WorkforceSegment[] = [
+      ...workforceLabels
+        .map((label) => ({
+          key: label.id,
+          name: label.name,
+          value: identitySkillUsage[label.id] || 0,
+          color: label.color,
+        }))
+        .filter((segment) => segment.value > 0),
+      ...(allTradeIdentityCount > 0
+        ? [{
+            key: ALL_TRADE_SKILL,
+            name: t("All-Trade"),
+            value: allTradeIdentityCount,
+            // A mix of color evocative of Joker cards (to represent the Jacks-of-all-trades)
+            // Royal Purple (#4B146E), Crimson (#C9233F), Emerald (#16845B),
+            // Golden (#F2D15C), Ivory (#F5F0E6), Midnight (#19151F);
+            // Or simple : "var(--vscode-charts-yellow, #d4a017)",
+            color: "#4B146E",
+          }]
+        : []),
+    ];
+
+    const renderWorkforceTube = (segments: WorkforceSegment[], emptyText: string) => {
+      const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+      if (total === 0) {
+        return (
+          <div style={{ display: "flex", alignItems: "center", height: "26px", padding: "0 8px", borderRadius: "6px", border: "1px solid var(--vscode-widget-border)", color: "var(--vscode-descriptionForeground)", fontSize: "11px" }}>
+            {emptyText}
+          </div>
+        );
+      }
+      return (
+        <div style={{ display: "flex", height: "26px", borderRadius: "6px", overflow: "hidden", border: "1px solid var(--vscode-widget-border)" }}>
+          {segments.map((segment) => (
+            <div
+              key={segment.key}
+              style={{
+                flex: `${segment.value} 1 0`,
+                minWidth: "0",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: segment.color,
+                color: segment.key === ALL_TRADE_SKILL ? "#F2D15C" : getReadableTextColor(segment.color),
+                fontSize: "11px",
+                padding: "0 4px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderRight: "1px solid rgba(0,0,0,0.18)",
+              }}
+              title={segment.name}
+            >
+              {segment.name}
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    // Ratio row: per label, demand (tasks) : supply (skill points).
+    // Segment width follows demand (tasks) so that the work is distributed visibly;
+    // labels with no tasks still get a visible slot to read their ratio.
+    const renderRatioTube = () => {
+      if (workforceRatios.length === 0) {
+        return (
+          <div style={{ display: "flex", alignItems: "center", height: "26px", padding: "0 8px", borderRadius: "6px", border: "1px solid var(--vscode-widget-border)", color: "var(--vscode-descriptionForeground)", fontSize: "11px" }}>
+            {t("No labelized tasks or identities.")}
+          </div>
+        );
+      }
+      return (
+        <div style={{ display: "flex", height: "26px", borderRadius: "6px", overflow: "hidden", border: "1px solid var(--vscode-widget-border)" }}>
+          {workforceRatios.map((ratio) => (
+            <div
+              key={ratio.label.id}
+              style={{
+                flex: `${Math.max(ratio.tasks, 1)} 1 0`,
+                minWidth: "0",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "4px",
+                backgroundColor: ratio.label.color,
+                color: getReadableTextColor(ratio.label.color),
+                fontSize: "11px",
+                padding: "0 4px",
+                overflow: "hidden",
+                whiteSpace: "nowrap",
+                borderRight: "1px solid rgba(0,0,0,0.18)",
+              }}
+              title={`${ratio.label.name}: ${ratio.tasks} : ${formatPoints(ratio.points)}`}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{ratio.label.name}</span>
+              <span style={{ fontWeight: 700 }}>{ratio.tasks} : {formatPoints(ratio.points)}</span>
+            </div>
+          ))}
+        </div>
+      );
+    };
+
     return (
       <div style={{ display: "flex", gap: "20px", flexWrap: "wrap", overflowY: "auto" }}>
         <div style={{ flex: "1 1 100%", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "20px", borderRadius: "6px" }}>
@@ -3474,6 +3786,28 @@ export const App: React.FC = () => {
               </li>
             ))}
           </ul>
+        </div>
+
+        <div style={{ flex: "1 1 100%", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "20px", borderRadius: "6px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "8px" }}>
+            <h3 style={{ margin: 0 }}>{t("Workforce spread")}</h3>
+            <span style={{ fontSize: "12px", fontWeight: 700 }}>{t("{0} workers", identityCount)}</span>
+          </div>
+          <p style={{ margin: "4px 0 14px", fontSize: "12px", color: "var(--vscode-descriptionForeground)" }}>
+            {t("How labelized tasks compare with labelized identities (skills).")}
+          </p>
+          <div style={{ marginBottom: "12px" }}>
+            <div style={{ fontSize: "12px", marginBottom: "4px", fontWeight: 700 }}>{t("Tasks by label")}</div>
+            {renderWorkforceTube(taskSegments, t("No labelized tasks."))}
+          </div>
+          <div style={{ marginBottom: "12px" }}>
+            <div style={{ fontSize: "12px", marginBottom: "4px", fontWeight: 700 }}>{t("Identities by skill")}</div>
+            {renderWorkforceTube(identitySegments, t("No labelized identities."))}
+          </div>
+          <div>
+            <div style={{ fontSize: "12px", marginBottom: "4px", fontWeight: 700 }}>{t("Ratio (tasks : skills)")}</div>
+            {renderRatioTube()}
+          </div>
         </div>
 
         <div style={{ flex: "1 1 320px", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "20px", borderRadius: "6px" }}>

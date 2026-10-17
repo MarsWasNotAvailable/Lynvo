@@ -313,5 +313,22 @@
   "Remove domain \"{0}\"? It contains {1} identity(ies).": "Remove domain \"{0}\"? It contains {1} identity(ies).",
   "Delete, including identities": "Delete, including identities",
   "Delete, keep identities local": "Delete, keep identities local",
-  "The \"local\" domain cannot be removed.": "The \"local\" domain cannot be removed."
+  "The \"local\" domain cannot be removed.": "The \"local\" domain cannot be removed.",
+  "Skills": "Skills",
+  "{0} Set": "{0} Set",
+  "Select skills": "Select skills",
+  "All-Trade": "All-Trade",
+  "All-Trade (can work on all type of tasks)": "All-Trade (can work on all type of tasks)",
+  "Select the skills for {0}": "Select the skills for {0}",
+  "{0} users": "{0} users",
+  "Workforce spread": "Workforce spread",
+  "How labelized tasks compare with labelized identities (skills).": "How labelized tasks compare with labelized identities (skills).",
+  "Tasks by label": "Tasks by label",
+  "Identities by skill": "Identities by skill",
+  "No labelized tasks.": "No labelized tasks.",
+  "No labelized identities.": "No labelized identities.",
+  "One or more skills are not a known label.": "One or more skills are not a known label.",
+  "{0} identities": "{0} identities",
+  "Ratio (tasks : skills)": "Ratio (tasks : skills)",
+  "No labelized tasks or identities.": "No labelized tasks or identities."
 }

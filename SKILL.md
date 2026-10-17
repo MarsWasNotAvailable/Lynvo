@@ -24,7 +24,7 @@ All board data lives in `.vscode/lynvo/` within the workspace root:
   board.json          # Schema version + labels registry
   columns.json        # Board columns (id, title, color, position)
   users.json          # Presence data (identity display shape with lastSeenAt)
-  identities.json     # Known identities + domains registry (display name, source, domain)
+  identities.json     # Known identities + domains registry (display name, source, domain, skills)
   settings.json       # User settings (currently empty object)
   tasks/
     {taskId}.json     # One JSON file per task
@@ -283,6 +283,7 @@ interface LynvoIdentity {
   source: string;      // Provider/kind: "local" | "github" | "gitlab"
   sourceId: string;    // The domain the identity belongs to (e.g. "acme", or a GitHub username)
   createdAt: number;   // Unix timestamp in milliseconds
+  skills?: string[];   // Optional — label ids the identity can work on, plus the reserved "lynvo:all-trade" token
 }
 ```
 
@@ -351,6 +352,15 @@ Identities are the project's known workers — humans or generative agents. A ta
 **Agent-Workers** set the task's `assigneeId` field to the identity ID they were given, e.g. `"assigneeId": "id-m5xk2stu-r1s2t3u4"`.
 
 **Caution for Agent-Managers:** do not overload `identities.json` with duplicate or near-duplicate names, and do not register one-off delegated sub-agents. An identity is a *personification* — a somewhat unique avatar that persists across the project (e.g. "John", "Build Bot", "Agent-1"), not a per-run session name.
+
+**Skills (bound to labels):**
+An identity may carry a `skills` array (optional). Each entry is either the id of an existing **label** (from `board.json`), or the reserved baked-in token **`lynvo:all-trade`** (a "jack-of-all-trades" generalist; it is *not* a label).
+- **All-Trade is mutually exclusive with specific skills:** an identity is either a generalist (`["lynvo:all-trade"]`) *or* a specialist (a list of label ids) — not both. Selecting All-Trade in the UI clears any specific skills (the label bubbles are then greyed out; turn All-Trade off to pick specifics again). A generalist covers "even the new kinds that might be added later."
+- When `skills` is absent or empty, external auto-assignment tools **must not** use that identity for automatic assignment.
+- A Lynvo user sets skills in the *Manage Identities* panel: each identity row has a **Skills** button (e.g. `3 Skills`, or just `Skills` when none) that opens a bubble picker of the existing labels plus **All-Trade**, with **Clear**/**Save**/**Cancel**. While All-Trade is selected the label bubbles are greyed out (disabled).
+- The *Labels* panel shows each label's identity coverage as `N users` next to its `N tasks`. The *Insights* **Workforce spread** card shows the total **identities** count, a *Tasks by label* tube, an *Identities by skill* tube (All-Trade as its own segment), and a per-label **ratio** row `tasks : skills` (e.g. `UI 1:1`, `CI 12:0`).
+- **Ratio / FTE model:** an identity is one worker; its capacity is split equally across the skills it covers. A specialist with *N* skills contributes `1/N` to each; an All-Trade (generalist) splits across *every* label, so it reports as a fraction `1/(total labels)` on each. This avoids over-counting a multi-skill identity as a full worker on each skill.
+- An **Agent-Manager** can set skills directly by adding the `skills` array to the identity in `identities.json` (either `"lynvo:all-trade"` *or* label ids — not both), commit, and pass the identity ID to the Agent-Workers.
 
 ## Field Defaults (Board Integrity)
 

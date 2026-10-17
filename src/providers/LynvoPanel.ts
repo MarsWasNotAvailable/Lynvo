@@ -10,7 +10,13 @@ import {
   fullRelationsForTask,
   planRelationChanges,
 } from "../relationModel";
-import { LynvoBoard, LynvoTask, LynvoTaskRelation, LynvoTaskRelationType } from "../types";
+import {
+  ALL_TRADE_SKILL,
+  LynvoBoard,
+  LynvoTask,
+  LynvoTaskRelation,
+  LynvoTaskRelationType,
+} from "../types";
 import {
   findMarkerLineIndex,
   isInCodeEditingEnabled,
@@ -832,6 +838,31 @@ export class LynvoPanel {
               return;
             }
             await DataManager.editIdentityName(identityId, displayName);
+            LynvoPanel.refreshDataAndScheduleSync();
+            webview.postMessage({ command: "identityResult", success: true });
+            return;
+          }
+          case "setIdentitySkills": {
+            const identityId = asString(message.identityId);
+            const rawSkills = asStringArray(message.skills);
+            if (!identityId || !rawSkills) {
+              return;
+            }
+            const board = await DataManager.loadBoard();
+            const labels = board?.labels || {};
+            // Every skill must be the reserved All-Trade token or a known label id.
+            const invalid = rawSkills.filter(
+              (skill) => skill !== ALL_TRADE_SKILL && !labels[skill],
+            );
+            if (invalid.length > 0) {
+              webview.postMessage({
+                command: "identityResult",
+                success: false,
+                error: t("One or more skills are not a known label."),
+              });
+              return;
+            }
+            await DataManager.setIdentitySkills(identityId, rawSkills);
             LynvoPanel.refreshDataAndScheduleSync();
             webview.postMessage({ command: "identityResult", success: true });
             return;

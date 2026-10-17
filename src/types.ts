@@ -9,6 +9,14 @@ export interface LynvoPresenceUser extends LynvoUser {
 }
 
 /**
+ * A reserved, baked-in Skill that is NOT a label.
+ * It marks an identity as a "jack-of-all-trades",
+ * informing that the identity can be assigned to any kinds of tasks.
+ * It is namespaced so it can never collide with a real label id.
+ */
+export const ALL_TRADE_SKILL = "lynvo:all-trade";
+
+/**
  * A `LynvoIdentity` contains :
  * a generated `id` like `id-mur3r8ds-vow62vvv`,
  * with a fancy name like `John`,
@@ -28,6 +36,13 @@ export interface LynvoIdentity {
   /** Domain Name - What group does the Identity belongs to : "acme" | "a-github-username" ? */
   sourceId: string;
   createdAt: number;
+  /**
+   * Optional skills bound to existing labels (id - not display names)
+   * and the reserved {@link ALL_TRADE_SKILL} token.
+   * When set as `undefined`, the identity declares no skills
+   * and the identity must not be considered for automated tasks assignment.
+   */
+  skills?: string[];
 }
 
 /**
