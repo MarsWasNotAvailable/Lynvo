@@ -330,5 +330,15 @@
   "One or more skills are not a known label.": "Una o più competenze non sono un'etichetta nota.",
   "{0} identities": "{0} identità",
   "Ratio (tasks : skills)": "Rapporto (task : competenze)",
-  "No labelized tasks or identities.": "Nessun task o identità con etichette."
+  "No labelized tasks or identities.": "Nessun task o identità con etichette.",
+  "Clear search": "Cancella ricerca",
+  "Remove skill filter": "Rimuovi filtro abilità",
+  "Clear all skill filters": "Cancella tutti i filtri abilità",
+  "Match all selected skills ( & )": "Corrisponde a tutte le abilità selezionate ( & )",
+  "Match any selected skill ( | )": "Corrisponde ad una delle abilità selezionate ( | )",
+  "Match none of the selected skills ( ! )": "Non corrisponde a nessuna delle abilità selezionate ( ! )",
+  "Label names cannot contain spaces or the # symbol.": "I nomi delle etichette non possono contenere spazi o il simbolo #.",
+  "Label names must be a single word or a compact token (e.g. UI, R&D, CI-CD). Spaces and the # symbol are not allowed.": "I nomi delle etichette devono essere una singola parola o un token compatto (es. UI, R&D, CI-CD). Non sono ammessi spazi o il simbolo #.",
+  "All columns": "Tutte le colonne",
+  "Filter workforce metrics by column": "Filtra le metriche del team per colonna"
 }

@@ -330,5 +330,15 @@
   "One or more skills are not a known label.": "Eine oder mehrere Fähigkeiten sind kein bekanntes Label.",
   "{0} identities": "{0} Identitäten",
   "Ratio (tasks : skills)": "Verhältnis (Tasks : Fähigkeiten)",
-  "No labelized tasks or identities.": "Keine Tasks oder Identitäten mit Labels."
+  "No labelized tasks or identities.": "Keine Tasks oder Identitäten mit Labels.",
+  "Clear search": "Suche löschen",
+  "Remove skill filter": "Skill-Filter entfernen",
+  "Clear all skill filters": "Alle Skill-Filter löschen",
+  "Match all selected skills ( & )": "Mit allen ausgewählten Skills übereinstimmen ( & )",
+  "Match any selected skill ( | )": "Mit einer der ausgewählten Skills übereinstimmen ( | )",
+  "Match none of the selected skills ( ! )": "Mit keiner der ausgewählten Skills übereinstimmen ( ! )",
+  "Label names cannot contain spaces or the # symbol.": "Bezeichnungsnamen dürfen keine Leerzeichen oder das #-Symbol enthalten.",
+  "Label names must be a single word or a compact token (e.g. UI, R&D, CI-CD). Spaces and the # symbol are not allowed.": "Bezeichnungsnamen müssen ein einzelnes Wort oder ein kompaktes Token sein (z. B. UI, R&D, CI-CD). Leerzeichen und das #-Symbol sind nicht erlaubt.",
+  "All columns": "Alle Spalten",
+  "Filter workforce metrics by column": "Team-Metriken nach Spalte filtern"
 }

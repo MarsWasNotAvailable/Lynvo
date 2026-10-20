@@ -330,5 +330,15 @@
   "One or more skills are not a known label.": "Una o más habilidades no son una etiqueta conocida.",
   "{0} identities": "{0} identidades",
   "Ratio (tasks : skills)": "Ratio (tareas : habilidades)",
-  "No labelized tasks or identities.": "Sin tareas ni identidades con etiquetas."
+  "No labelized tasks or identities.": "Sin tareas ni identidades con etiquetas.",
+  "Clear search": "Limpiar búsqueda",
+  "Remove skill filter": "Quitar filtro de habilidad",
+  "Clear all skill filters": "Limpiar todos los filtros de habilidad",
+  "Match all selected skills ( & )": "Coincidir con todas las habilidades seleccionadas ( & )",
+  "Match any selected skill ( | )": "Coincidir con alguna de las habilidades seleccionadas ( | )",
+  "Match none of the selected skills ( ! )": "No coincidir con ninguna de las habilidades seleccionadas ( ! )",
+  "Label names cannot contain spaces or the # symbol.": "Los nombres de etiqueta no pueden contener espacios ni el símbolo #.",
+  "Label names must be a single word or a compact token (e.g. UI, R&D, CI-CD). Spaces and the # symbol are not allowed.": "Los nombres de etiqueta deben ser una sola palabra o un token compacto (p. ej. UI, R&D, CI-CD). No se permiten espacios ni el símbolo #.",
+  "All columns": "Todas las columnas",
+  "Filter workforce metrics by column": "Filtrar métricas del equipo por columna"
 }

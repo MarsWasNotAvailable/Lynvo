@@ -330,5 +330,15 @@
   "One or more skills are not a known label.": "One or more skills are not a known label.",
   "{0} identities": "{0} identities",
   "Ratio (tasks : skills)": "Ratio (tasks : skills)",
-  "No labelized tasks or identities.": "No labelized tasks or identities."
+  "No labelized tasks or identities.": "No labelized tasks or identities.",
+  "Clear search": "Clear search",
+  "Remove skill filter": "Remove skill filter",
+  "Clear all skill filters": "Clear all skill filters",
+  "Match all selected skills ( & )": "Match all selected skills ( & )",
+  "Match any selected skill ( | )": "Match any selected skill ( | )",
+  "Match none of the selected skills ( ! )": "Match none of the selected skills ( ! )",
+  "Label names cannot contain spaces or the # symbol.": "Label names cannot contain spaces or the # symbol.",
+  "Label names must be a single word or a compact token (e.g. UI, R&D, CI-CD). Spaces and the # symbol are not allowed.": "Label names must be a single word or a compact token (e.g. UI, R&D, CI-CD). Spaces and the # symbol are not allowed.",
+  "All columns": "All columns",
+  "Filter workforce metrics by column": "Filter workforce metrics by column"
 }

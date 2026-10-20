@@ -734,6 +734,10 @@ const lynvoStyles = `
     height: 100vh;
     display: grid;
     grid-template-rows: auto auto 1fr;
+    /* Constrain the single column to the shell's width: an unconstrained auto
+       track would grow to the content's width, so inner overflow-auto
+       panels (e.g. the identities table) would never got a chance to scroll. */
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
     padding: 16px;
     overflow: hidden;
@@ -1199,8 +1203,18 @@ export const App: React.FC = () => {
   const [skillsEditorIdentityId, setSkillsEditorIdentityId] = useState<string | null>(null);
   const [draftSkills, setDraftSkills] = useState<string[]>([]);
   const [identitySearch, setIdentitySearch] = useState("");
-  const [identitySortKey, setIdentitySortKey] = useState<"name" | "added" | "recent">("name");
+  const [identitySortKey, setIdentitySortKey] = useState<"name" | "added" | "recent" | "domain">("name");
   const [identitySortAsc, setIdentitySortAsc] = useState(true);
+  // Skill filters: `#skill:` tokens that resolved to a known skill while
+  // typing become persistent bubbles (they survive clearing the search input).
+  const [skillFilterIds, setSkillFilterIds] = useState<string[]>([]);
+  // How several skill filters combine: "and" (identity must carry all of them),
+  // "or" (any of them), or "not" (none of them). Default: AND.
+  const [skillFilterMode, setSkillFilterMode] = useState<"and" | "or" | "not">("and");
+  // The Insights "Workforce spread" column focus. Empty string ("") means every column.
+  // Lets the manager narrow the task-side metrics to a column
+  // (e.g. exclude the Archive column from the spread).
+  const [workforceColumnFilter, setWorkforceColumnFilter] = useState("");
   // Session-only tracking of set active identities (most recent first).
   // Intentionally in-memory: it is lost when the extension / webview restarts.
   // Meant as a convenience when switching the active identity.
@@ -2751,6 +2765,13 @@ export const App: React.FC = () => {
         (label) => label.id !== excludeId && label.name.toLowerCase() === name.toLowerCase(),
       );
 
+    // Validate Label name :
+    // - we want to encourage Label names to be small and compact tokens,
+    // - spaces would make parsing `#skill:` more difficult
+    // - `#` is the reserved metatag prefix
+    const hasForbiddenLabelChars = (name: string): boolean =>
+      /\s/.test(name) || name.includes("#");
+
     const startEditingLabel = (label: LynvoLabel) => {
       setEditingLabelId(label.id);
       setEditLabelName(label.name);
@@ -2760,6 +2781,11 @@ export const App: React.FC = () => {
 
     const saveLabelEdit = () => {
       if (!editingLabelId || !editLabelName.trim()) {return;}
+      // Enforcing small or compacted name. Make `#skill:` search easier to handle.
+      if (hasForbiddenLabelChars(editLabelName.trim())) {
+        setLabelError(t("Label names cannot contain spaces or the # symbol."));
+        return;
+      }
       if (nameExists(editLabelName.trim(), editingLabelId)) {
         setLabelError(t("A label with this name already exists."));
         return;
@@ -2776,6 +2802,11 @@ export const App: React.FC = () => {
 
     const createNewLabel = () => {
       if (!newLabelName.trim()) {return;}
+      // Enforcing small or compacted name. Make `#skill:` search easier to handle.
+      if (hasForbiddenLabelChars(newLabelName.trim())) {
+        setLabelError(t("Label names cannot contain spaces or the # symbol."));
+        return;
+      }
       if (nameExists(newLabelName.trim())) {
         setLabelError(t("A label with this name already exists."));
         return;
@@ -2817,6 +2848,10 @@ export const App: React.FC = () => {
               <SortIcon direction={labelsSortAsc ? "asc" : "desc"} />
             </button>
           </div>
+        </div>
+
+        <div style={{ fontSize: "12px", color: "var(--vscode-descriptionForeground)", marginBottom: "12px" }}>
+          {t("Label names must be a single word or a compact token (e.g. UI, R&D, CI-CD). Spaces and the # symbol are not allowed.")}
         </div>
 
         {labelError && (
@@ -2873,7 +2908,7 @@ export const App: React.FC = () => {
                       style={{ flex: 1, padding: "5px" }}
                       aria-label={t("Label name")}
                     />
-                    <button className="icon-btn" style={iconButtonStyle} onClick={saveLabelEdit} title={t("Save")} aria-label={t("Save")}><SaveIcon /></button>
+                    <button className="icon-btn" style={iconButtonStyle} onClick={saveLabelEdit} disabled={hasForbiddenLabelChars(editLabelName.trim())} title={t("Save")} aria-label={t("Save")}><SaveIcon /></button>
                     <button className="icon-btn" style={iconButtonStyle} onClick={() => setEditingLabelId(null)} title={t("Cancel")} aria-label={t("Cancel")}>×</button>
                   </>
                 ) : (
@@ -2942,7 +2977,7 @@ export const App: React.FC = () => {
               className="icon-btn"
               style={iconButtonStyle}
               onClick={createNewLabel}
-              disabled={!newLabelName.trim()}
+              disabled={!newLabelName.trim() || hasForbiddenLabelChars(newLabelName.trim())}
               title={t("Create Label")}
               aria-label={t("Create Label")}
             >
@@ -2957,13 +2992,60 @@ export const App: React.FC = () => {
   const renderIdentitiesManager = () => {
     if (!boardData) {return null;}
 
-    const identitySearchTerm = identitySearch.trim().toLowerCase();
     const unfilteredIdentities = Object.values(boardData.identities || {});
-    const filteredIdentities = unfilteredIdentities.filter(
-      (identity) =>
-        identity.displayName.toLowerCase().startsWith(identitySearchTerm)
-        ||       identity.id.toLowerCase().startsWith(identitySearchTerm),
-    );
+
+    // Search: plain text matches (with startsWith) the display name or id.
+    // `#skill:Label` tokens filter by skill, e.g. `#skill:UI`, `#skill:R&D #skill:UI`.
+    // When a typed `#skill:` token resolves to a known skill, it is committed into
+    // `skillFilterIds` (shown as bubbles on the filters bar below the search bar)
+    // and keeps applying even if the search input is cleared.
+    // Multiple skill filters combine with & (all), | (any) or ! (none) —
+    // toggled beside the sort option; default is &. Unknown skill tokens are ignored.
+    const labelNameById = new Map<string, string>();
+    const labelIdByName = new Map<string, string>();
+    Object.values(boardData.labels || {}).forEach((label) => {
+      labelNameById.set(label.id, label.name);
+      labelIdByName.set(label.name.toLowerCase(), label.id);
+    });
+    const resolveSkillToken = (token: string): string | undefined => {
+      const lower = token.trim().toLowerCase();
+      if (lower === "all-trade") {return ALL_TRADE_SKILL;}
+      return labelIdByName.get(lower);
+    };
+    // A `#skill:` token is committed into the filter bubbles when it is
+    // terminated by the space bar (or Enter): committing on every keystroke
+    // would shadow longer skill names that share a prefix (e.g. `Ex` vs `Example`).
+    const commitLastToken = (text: string) => {
+      const tokens = text.split(/\s+/).filter((token) => token.length > 0);
+      const last = tokens[tokens.length - 1];
+      if (!last || !/^#skill:/i.test(last)) {return;}
+      const skillId = resolveSkillToken(last.slice("#skill:".length));
+      if (!skillId) {return;}
+      setSkillFilterIds((prev) => (prev.includes(skillId) ? prev : [...prev, skillId]));
+      // The committed token now lives as a bubble; drop it from the search input.
+      setIdentitySearch(tokens.slice(0, -1).join(" "));
+    };
+    const searchTokens = identitySearch.split(/\s+/).filter((token) => token.length > 0);
+    // Any token starting with `#` is a (possibly still-incomplete) metatag like
+    // `#skill:Label`: it must not pollute the name search while it is being typed.
+    const nameTerm = searchTokens
+      .filter((token) => !token.startsWith("#"))
+      .join(" ")
+      .toLowerCase();
+    const filteredIdentities = unfilteredIdentities.filter((identity) => {
+      if (nameTerm && !(
+        identity.displayName.toLowerCase().startsWith(nameTerm)
+        || identity.id.toLowerCase().startsWith(nameTerm)
+      )) {
+        return false;
+      }
+      if (skillFilterIds.length === 0) {return true;}
+      const skills = identity.skills || [];
+      if (skillFilterMode === "and") {return skillFilterIds.every((skillId) => skills.includes(skillId));}
+      if (skillFilterMode === "not") {return skillFilterIds.every((skillId) => !skills.includes(skillId));}
+      return skillFilterIds.some((skillId) => skills.includes(skillId));
+    });
+
     // Rank for the "recently active" sort: the current active identity is rank 0,
     // then the ones most recently made current this session (recency history);
     // identities never activated this session rank last.
@@ -2972,14 +3054,21 @@ export const App: React.FC = () => {
       const idx = recentIdentityIds.indexOf(id);
       return idx === -1 ? Number.MAX_SAFE_INTEGER : idx + 1;
     };
-    const identities = 
-      (identitySearchTerm.length === 0 ? unfilteredIdentities : [...filteredIdentities])
+    // Human-readable list of an identity's selected skills (Skills button tooltip).
+    const describeSkills = (identity: LynvoIdentity): string =>
+      (identity.skills || [])
+        .map((skillId) => (skillId === ALL_TRADE_SKILL ? t("All-Trade") : labelNameById.get(skillId) || skillId))
+        .join(", ");
+    const identities =
+      filteredIdentities
       .sort((a, b) => {
         let cmp;
         if (identitySortKey === "added") {
           cmp = a.createdAt - b.createdAt;
         } else if (identitySortKey === "recent") {
           cmp = recentRank(a.id) - recentRank(b.id);
+        } else if (identitySortKey === "domain") {
+          cmp = a.sourceId.localeCompare(b.sourceId, undefined, { sensitivity: "base" });
         } else {
           cmp = a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
         }
@@ -3249,22 +3338,56 @@ export const App: React.FC = () => {
 
         {!showAddDomain && (
         <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "12px", flexWrap: "wrap" }}>
-          <input
-            value={identitySearch}
-            onChange={(e) => setIdentitySearch(e.target.value)}
-            placeholder={t("Search identities...")}
-            style={{ flex: 1, minWidth: "160px", padding: "5px" }}
-            aria-label={t("Search identities")}
-          />
+          <div style={{ position: "relative", flex: 1, minWidth: "160px" }}>
+            <input
+              value={identitySearch}
+              onChange={(e) => setIdentitySearch(e.target.value)}
+              onKeyUp={(e) => {
+                if (e.key === " " || e.key === "Enter") {
+                  commitLastToken(e.currentTarget.value);
+                }
+              }}
+              placeholder={t("Search identities...")}
+              style={{ width: "100%", padding: "5px", paddingRight: identitySearch.length > 0 ? "26px" : "5px" }}
+              aria-label={t("Search identities")}
+            />
+            {identitySearch.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setIdentitySearch("")}
+                title={t("Clear search")}
+                aria-label={t("Clear search")}
+                style={{
+                  position: "absolute",
+                  right: "4px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  border: "none",
+                  background: "transparent",
+                  padding: "2px 4px",
+                  margin: 0,
+                  cursor: "pointer",
+                  color: "var(--vscode-descriptionForeground)",
+                  fontSize: "14px",
+                  lineHeight: 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                }}
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+            )}
+          </div>
           <select
             value={identitySortKey}
-            onChange={(e) => setIdentitySortKey(e.target.value as "name" | "added")}
+            onChange={(e) => setIdentitySortKey(e.target.value as "name" | "added" | "recent" | "domain")}
             style={{ padding: "4px" }}
             aria-label={t("Sort identities by")}
           >
             <option value="name">{t("Name")}</option>
             <option value="added">{t("Added date")}</option>
             <option value="recent">{t("Recently active")}</option>
+            <option value="domain">{t("Domain")}</option>
           </select>
           <button
             type="button"
@@ -3289,6 +3412,114 @@ export const App: React.FC = () => {
             <SortIcon direction={identitySortAsc ? "asc" : "desc"} />
           </button>
         </div>
+        )}
+
+        {/* Skill filters bar: appears only when at least one valid `#skill:` token has been entered. */}
+        {!showAddDomain && skillFilterIds.length > 0 && (
+          <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", marginBottom: "12px" }}>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+            {skillFilterIds.map((skillId) => {
+              const isAllTrade = skillId === ALL_TRADE_SKILL;
+              const label = isAllTrade ? undefined : boardData.labels ? boardData.labels[skillId] : undefined;
+              const bubbleColor = isAllTrade
+                ? "var(--vscode-charts-yellow, #d4a017)"
+                : label?.color || "var(--vscode-editor-inactiveSelectionBackground)";
+              const bubbleName = isAllTrade ? t("All-Trade") : label?.name || skillId;
+              return (
+                <span
+                  key={skillId}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    fontSize: "11px",
+                    border: `1px solid ${bubbleColor}`,
+                    backgroundColor: bubbleColor,
+                    color: isAllTrade ? "#0d1117" : label ? getReadableTextColor(label.color) : "inherit",
+                  }}
+                >
+                  {bubbleName}
+                  <button
+                    type="button"
+                    title={t("Remove skill filter")}
+                    aria-label={`${t("Remove skill filter")}: ${bubbleName}`}
+                    onClick={() => setSkillFilterIds((prev) => prev.filter((id) => id !== skillId))}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      padding: 0,
+                      margin: 0,
+                      cursor: "pointer",
+                      fontSize: "13px",
+                      lineHeight: 1,
+                      color: "inherit",
+                      display: "inline-flex",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span aria-hidden="true">×</span>
+                  </button>
+                </span>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setSkillFilterIds([])}
+              title={t("Clear all skill filters")}
+              aria-label={t("Clear all skill filters")}
+              style={{
+                padding: "2px 8px",
+                borderRadius: "10px",
+                fontSize: "11px",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                color: "var(--vscode-descriptionForeground)",
+              }}
+            >
+              {t("Clear")}
+            </button>
+            </div>
+            {/* Skill-filter mode: & = all, | = any, ! = none. */}
+            <div style={{ marginLeft: "auto", display: "inline-flex", borderRadius: "6px", border: "1px solid var(--vscode-widget-border)" }}>
+              {(["and", "or", "not"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setSkillFilterMode(mode)}
+                  title={
+                    mode === "and"
+                      ? t("Match all selected skills ( & )")
+                      : mode === "or"
+                        ? t("Match any selected skill ( | )")
+                        : t("Match none of the selected skills ( ! )")
+                  }
+                  aria-label={
+                    mode === "and"
+                      ? t("Match all selected skills ( & )")
+                      : mode === "or"
+                        ? t("Match any selected skill ( | )")
+                        : t("Match none of the selected skills ( ! )")
+                  }
+                  aria-pressed={skillFilterMode === mode}
+                  style={{
+                    padding: "3px 9px",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    lineHeight: 1.4,
+                    border: "none",
+                    cursor: "pointer",
+                    backgroundColor: skillFilterMode === mode ? "var(--vscode-button-background)" : "transparent",
+                    color: skillFilterMode === mode ? "var(--vscode-button-foreground)" : "inherit",
+                  }}
+                >
+                  {mode === "and" ? "&" : mode === "or" ? "|" : "!"}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {showAddDomain && (
@@ -3388,6 +3619,9 @@ export const App: React.FC = () => {
             borderRadius: "6px",
           }}
         >
+          {/* Keeps the table at its natural width on narrow windows:
+              the container above then scrolls horizontally instead of the rows overflowing invisibly. */}
+          <div style={{ minWidth: "888px" }}>
           {/* Header row */}
           <div style={{ ...row, position: "sticky", top: 0, zIndex: 1, backgroundColor: "var(--vscode-editor-background)", fontWeight: 700, fontSize: "11px", color: "var(--vscode-descriptionForeground)", borderBottom: "1px solid var(--vscode-widget-border)" }}>
             <div style={colName}>{t("Name")}</div>
@@ -3464,7 +3698,7 @@ export const App: React.FC = () => {
                       backgroundColor: skillCount > 0 ? "var(--vscode-editor-inactiveSelectionBackground)" : "transparent",
                       color: "inherit",
                     }}
-                    title={t("Select skills")}
+                    title={skillCount > 0 ? `${t("Select skills")}\n\n${t("{0} Set", describeSkills(identity))}` : t("Select skills")}
                     aria-label={`${t("Skills")}: ${identity.displayName}`}
                   >
                     {skillCount > 0 ? t("{0} Set", skillCount) : t("Add")}
@@ -3567,6 +3801,7 @@ export const App: React.FC = () => {
               <button type="button" className="icon-btn" style={iconButtonStyle} onClick={submitAddIdentity} disabled={!newIdentityName.trim()} title={t("Add identity")} aria-label={t("Add identity")}><PlusIcon /></button>
             </div>
           </div>
+          </div>
         </div>
         )}
       </div>
@@ -3600,6 +3835,20 @@ export const App: React.FC = () => {
       a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
     );
     const allLabelIds = new Set(workforceLabels.map((label) => label.id));
+
+    // Column focus for the task-side metrics. Empty string ("") means every column.
+    // Lets the manager narrow the spread to a column (e.g. exclude archived tasks).
+    const scopedLabelUsage: Record<string, number> =
+      workforceColumnFilter === ""
+        ? labelUsage
+        : Object.fromEntries(
+            workforceLabels.map((label) => [
+              label.id,
+              tasks.filter(
+                (task) => task.status === workforceColumnFilter && (task.labelIds || []).includes(label.id),
+              ).length,
+            ]),
+          );
     const identities = Object.values(boardData.identities || {});
     const identityCount = identities.length;
     const allTradeIdentityCount = identities.filter((identity) =>
@@ -3636,7 +3885,7 @@ export const App: React.FC = () => {
     const workforceRatios = workforceLabels
       .map((label) => ({
         label,
-        tasks: labelUsage[label.id] || 0,
+        tasks: scopedLabelUsage[label.id] || 0,
         points: skillPoints[label.id] || 0,
       }))
       .filter((ratio) => ratio.tasks > 0 || ratio.points > 0);
@@ -3649,7 +3898,7 @@ export const App: React.FC = () => {
       .map((label) => ({
         key: label.id,
         name: label.name,
-        value: labelUsage[label.id] || 0,
+        value: scopedLabelUsage[label.id] || 0,
         color: label.color,
       }))
       .filter((segment) => segment.value > 0);
@@ -3791,7 +4040,20 @@ export const App: React.FC = () => {
         <div style={{ flex: "1 1 100%", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "20px", borderRadius: "6px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "8px" }}>
             <h3 style={{ margin: 0 }}>{t("Workforce spread")}</h3>
-            <span style={{ fontSize: "12px", fontWeight: 700 }}>{t("{0} workers", identityCount)}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              <select
+                value={workforceColumnFilter}
+                onChange={(e) => setWorkforceColumnFilter(e.target.value)}
+                style={{ padding: "4px" }}
+                aria-label={t("Filter workforce metrics by column")}
+              >
+                <option value="">{t("All columns")}</option>
+                {sortedColumns.map((column) => (
+                  <option key={column.id} value={column.id}>{column.title}</option>
+                ))}
+              </select>
+              <span style={{ fontSize: "12px", fontWeight: 700 }}>{t("{0} workers", identityCount)}</span>
+            </div>
           </div>
           <p style={{ margin: "4px 0 14px", fontSize: "12px", color: "var(--vscode-descriptionForeground)" }}>
             {t("How labelized tasks compare with labelized identities (skills).")}
