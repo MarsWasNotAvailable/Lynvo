@@ -10,13 +10,11 @@ import {
   LynvoDomain,
   LynvoIdentity,
   LynvoLabel,
-  LynvoPresenceUser,
   LynvoSyncMetadata,
   LynvoTask,
   LynvoTaskRelation,
   LynvoTaskRelationType,
   LynvoTombstone,
-  LynvoUser,
 } from "../types";
 import { t } from "../l10n";
 import { canonicalizeRelation } from "../relationModel";
@@ -34,8 +32,6 @@ type BoardMetadata = {
   version: string;
   labels?: Record<string, LynvoLabel>;
 };
-
-const UNKNOWN_USER = { githubId: "unknown", username: "Unknown" };
 
 // Map a task relation type to its specific activity type.
 // `related` uses the legacy catch-all `relation_added` / `relation_deleted`.
@@ -197,17 +193,6 @@ export class DataManager {
     };
     identities[identity.id] = identity;
     return identity.id;
-  }
-
-  /**
-   * Map the signing identity (or anonymous) to the legacy display shape still
-   * used by the activity actor, presence entries and tombstones.
-   */
-  private static toLegacyUser(identity: LynvoIdentity | undefined): LynvoUser {
-    if (identity) {
-      return { githubId: identity.sourceId, username: identity.displayName };
-    }
-    return UNKNOWN_USER;
   }
 
   private static ensureBoardIntegrity(board: Partial<LynvoBoard>): LynvoBoard {
@@ -442,7 +427,7 @@ export class DataManager {
     try {
       const metadata = await this.readJson<BoardMetadata>(boardUri);
       const columns = await this.readJson<Record<string, LynvoColumn>>(columnsUri);
-      const users = await this.readOptionalJson<Record<string, LynvoPresenceUser>>(
+      const users = await this.readOptionalJson<Record<string, number>>(
         usersUri,
         {},
       );
@@ -624,7 +609,9 @@ export class DataManager {
       id,
       type,
       message,
-      actor: this.toLegacyUser(actor),
+      // Identity ID of the signing identity (undefined = anonymous);
+      // resolved to a display name at render time.
+      actor: actor?.id,
       createdAt: Date.now(),
       ...options,
     };
@@ -643,7 +630,8 @@ export class DataManager {
       entityType,
       entityId,
       deletedAt: Date.now(),
-      deletedBy: this.toLegacyUser(actor),
+      // Identity ID of the signing identity (undefined = anonymous).
+      deletedBy: actor?.id,
     };
   }
 
@@ -779,9 +767,14 @@ export class DataManager {
    *    then drop A's "blocks" entry. Only `blocks` / `blocked-by` are touched;
    *    `related` / `duplicates` keep their stored direction.
    * 2) Attribution:
-   *    the legacy LynvoUser (`{ githubId, username }`) objects
-   *    found in Tasks (through the `createdBy` / `lastModifiedBy` properties)
+   *    the legacy `{ githubId, username }` objects found in Tasks
+   *    (through the `createdBy` / `lastModifiedBy` properties)
    *    should become an Identity by reusing a matching identity or creating one.
+   * 3) Activity and Tombstones:
+   *    the same legacy objects in `activity[*].actor` and `tombstones[*].deletedBy`
+   *    become identity IDs ("Unknown" becomes anonymous).
+   * 4) Presence:
+   *    `users` becomes `Record<identityId, lastSeenAt>` (anonymous entries dropped).
    * Finally the board version is stamped to the extension's schema version.
    * Invoked only from the user-confirmed "Update data" migration prompt.
    */
@@ -831,6 +824,34 @@ export class DataManager {
         task.lastModifiedBy =
           this.normalizeSigningRef(task.lastModifiedBy, identities) ?? task.createdBy;
       }
+
+      // 3) Convert legacy actor / deletedBy objects to identity IDs.
+      for (const activity of Object.values(board.activity || {})) {
+        activity.actor = this.normalizeSigningRef(activity.actor, identities);
+      }
+      for (const tombstone of Object.values(board.tombstones || {})) {
+        tombstone.deletedBy = this.normalizeSigningRef(tombstone.deletedBy, identities);
+      }
+
+      // 4) Reshape presence to Record<identityId, lastSeenAt>.
+      const legacyPresence = (board.users || {}) as Record<string, unknown>;
+      const presence: Record<string, number> = {};
+      for (const [key, value] of Object.entries(legacyPresence)) {
+        const lastSeenAt =
+          typeof value === "number"
+            ? value
+            : value && typeof value === "object" && typeof (value as { lastSeenAt?: unknown }).lastSeenAt === "number"
+              ? (value as { lastSeenAt: number }).lastSeenAt
+              : undefined;
+        if (typeof lastSeenAt !== "number") {continue;}
+        // The key is already an identity ID when possible;
+        // otherwise resolve (or materialize) it from the legacy pair.
+        const identityId = board.identities[key]
+          ? key
+          : this.normalizeSigningRef(value, identities);
+        if (identityId) {presence[identityId] = lastSeenAt;}
+      }
+      board.users = presence;
 
       board.version = getSchemaVersion();
     });
@@ -935,11 +956,8 @@ export class DataManager {
         return; // No current identity: nothing to mark as present.
       }
       board.users = board.users || {};
-      board.users[identity.id] = {
-        githubId: identity.sourceId,
-        username: identity.displayName,
-        lastSeenAt: Date.now(),
-      };
+      // Presence: identity ID -> lastSeenAt (the identity record carries the rest).
+      board.users[identity.id] = Date.now();
       await this.saveBoardUnsafe(board);
     });
     this.writeQueue = run.then(

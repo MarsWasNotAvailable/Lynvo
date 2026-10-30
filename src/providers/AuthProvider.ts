@@ -1,6 +1,16 @@
 import * as vscode from "vscode";
-import { LynvoUser } from "../types";
 import { t } from "../l10n";
+
+/**
+ * A third-party provider account (provider-agnostic).
+ * Used to register remote domains; not an attribution shape.
+ */
+export interface ProviderAccount {
+  /** Provider-unique account id (e.g. GitHub numeric id). */
+  id: string;
+  /** Human-readable account label (e.g. GitHub login name). */
+  label: string;
+}
 
 interface GitHubUserOptions {
   createIfNone?: boolean;
@@ -9,7 +19,7 @@ interface GitHubUserOptions {
 export class AuthProvider {
   public static async getGitHubUser(
     options: GitHubUserOptions = {},
-  ): Promise<LynvoUser | undefined> {
+  ): Promise<ProviderAccount | undefined> {
     const { createIfNone = false } = options;
 
     try {
@@ -21,8 +31,8 @@ export class AuthProvider {
 
       if (session) {
         return {
-          githubId: session.account.id,
-          username: session.account.label,
+          id: session.account.id,
+          label: session.account.label,
         };
       }
     } catch (error) {

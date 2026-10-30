@@ -809,10 +809,10 @@ export class LynvoPanel {
             const board = await DataManager.loadBoard();
             const domains = board?.domains || {};
             const alreadyExists = Object.values(domains).some(
-              (domain) => domain.name.toLowerCase() === user.username.toLowerCase(),
+              (domain) => domain.name.toLowerCase() === user.label.toLowerCase(),
             );
             if (!alreadyExists) {
-              await DataManager.addDomain(user.username, provider, user.githubId);
+              await DataManager.addDomain(user.label, provider, user.id);
             }
             LynvoPanel.refreshDataAndScheduleSync();
             webview.postMessage({ command: "identityResult", success: true });

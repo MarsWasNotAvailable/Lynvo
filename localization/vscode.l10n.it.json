@@ -340,5 +340,6 @@
   "Label names cannot contain spaces or the # symbol.": "I nomi delle etichette non possono contenere spazi o il simbolo #.",
   "Label names must be a single word or a compact token (e.g. UI, R&D, CI-CD). Spaces and the # symbol are not allowed.": "I nomi delle etichette devono essere una singola parola o un token compatto (es. UI, R&D, CI-CD). Non sono ammessi spazi o il simbolo #.",
   "All columns": "Tutte le colonne",
-  "Filter workforce metrics by column": "Filtra le metriche del team per colonna"
+  "Filter workforce metrics by column": "Filtra le metriche del team per colonna",
+  "Anonymous": "Anonimo"
 }

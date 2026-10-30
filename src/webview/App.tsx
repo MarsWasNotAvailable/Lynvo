@@ -1540,20 +1540,61 @@ export const App: React.FC = () => {
     [activityItems],
   );
 
+  // Resolve a stored actor reference (identity ID) to a display name.
+  // Boards not migrated yet (or synced from an older Lynvo) may still carry
+  // legacy `{ githubId, username }` objects; fall back to the legacy username.
+  const actorDisplayName = (actor: unknown): string => {
+    if (typeof actor === "string") {
+      // A dangling ID (identity removed) is shown as-is rather than fake-anonymous.
+      return boardData?.identities?.[actor]?.displayName || actor;
+    }
+    if (actor && typeof actor === "object") {
+      const username = (actor as { username?: unknown }).username;
+      if (typeof username === "string" && username.trim() && username.toLowerCase() !== "unknown") {
+        return username;
+      }
+    }
+    return t("Anonymous");
+  };
+
+  // Presence entry lastSeenAt: the new shape is a plain timestamp;
+  // the legacy shape is an object carrying lastSeenAt.
+  const presenceLastSeenAt = (value: unknown): number | undefined => {
+    if (typeof value === "number") {return value;}
+    if (value && typeof value === "object") {
+      const lastSeenAt = (value as { lastSeenAt?: unknown }).lastSeenAt;
+      if (typeof lastSeenAt === "number") {return lastSeenAt;}
+    }
+    return undefined;
+  };
+
+  // Presence display name: resolve the identity, legacy username as fallback.
+  const presenceDisplayName = (identityId: string, value: unknown): string => {
+    const displayName = boardData?.identities?.[identityId]?.displayName;
+    if (displayName) {return displayName;}
+    if (value && typeof value === "object") {
+      const username = (value as { username?: unknown }).username;
+      if (typeof username === "string" && username.trim() && username.toLowerCase() !== "unknown") {
+        return username;
+      }
+    }
+    return identityId;
+  };
+
   const activityUsers = useMemo(
     () =>
-      Array.from(new Set(activityItems.map((item) => item.actor.username))).sort(
+      Array.from(new Set(activityItems.map((item) => actorDisplayName(item.actor)))).sort(
         (a, b) => a.localeCompare(b),
       ),
-    [activityItems],
+    [activityItems, boardData],
   );
 
   const filteredActivityItems = useMemo(
     () =>
       activityItems
         .filter((item) => !activityTypeFilter || item.type === activityTypeFilter)
-        .filter((item) => !activityUserFilter || item.actor.username === activityUserFilter),
-    [activityItems, activityTypeFilter, activityUserFilter],
+        .filter((item) => !activityUserFilter || actorDisplayName(item.actor) === activityUserFilter),
+    [activityItems, activityTypeFilter, activityUserFilter, boardData],
   );
 
   const unresolvedConflicts = useMemo(
@@ -1573,8 +1614,13 @@ export const App: React.FC = () => {
         : "#d29922";
   const activeUsers = useMemo(() => {
     const cutoff = Date.now() - 1000 * 60 * 5;
-    return Object.values(boardData?.users || {})
-      .filter((user) => user.lastSeenAt >= cutoff)
+    const users = (boardData?.users || {}) as Record<string, unknown>;
+    return Object.entries(users)
+      .map(([identityId, value]) => ({ identityId, lastSeenAt: presenceLastSeenAt(value) }))
+      .filter(
+        (user): user is { identityId: string; lastSeenAt: number } =>
+          typeof user.lastSeenAt === "number" && user.lastSeenAt >= cutoff,
+      )
       .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
   }, [boardData]);
 
@@ -4592,7 +4638,7 @@ export const App: React.FC = () => {
                     <span>{item.message}</span>
                   </div>
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px", fontSize: "11px", color: "var(--vscode-descriptionForeground)" }}>
-                    <span>{item.actor.username}</span>
+                    <span>{actorDisplayName(item.actor)}</span>
                   </div>
                 </div>
                 <div style={{ fontSize: "11px", color: "var(--vscode-descriptionForeground)", whiteSpace: "nowrap" }}>
@@ -4763,7 +4809,7 @@ export const App: React.FC = () => {
           </span>
           {activeUsers.length > 0 && (
             <span
-              title={activeUsers.map((user) => user.username).join(", ")}
+              title={activeUsers.map((user) => presenceDisplayName(user.identityId, (boardData?.users || {})[user.identityId])).join(", ")}
               style={{
                 fontSize: "11px",
                 border: "1px solid var(--vscode-widget-border)",

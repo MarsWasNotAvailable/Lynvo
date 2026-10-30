@@ -23,7 +23,7 @@ All board data lives in `.vscode/lynvo/` within the workspace root:
 .vscode/lynvo/
   board.json          # Schema version + labels registry
   columns.json        # Board columns (id, title, color, position)
-  users.json          # Presence data (identity display shape with lastSeenAt)
+  users.json          # Presence: identity ID -> lastSeenAt (Unix ms)
   identities.json     # Known identities + domains registry (display name, source, domain, skills)
   settings.json       # User settings (currently empty object)
   tasks/
@@ -138,7 +138,7 @@ interface LynvoActivity {
   type: LynvoActivityType;
   message: string;     // Human-readable description
   createdAt: number;
-  actor: LynvoUser;
+  actor?: string;      // Identity ID (identities.json); undefined = anonymous
   taskId?: string;     // Primary task affected
   targetTaskId?: string; // Secondary task (for relations)
   metadata?: Record<string, string | number | boolean | null>;
@@ -222,7 +222,7 @@ interface LynvoTombstone {
   entityType: "task" | "column" | "label";
   entityId: string;
   deletedAt: number;
-  deletedBy: LynvoUser;
+  deletedBy?: string;      // Identity ID (identities.json); undefined = anonymous
 }
 ```
 
@@ -241,21 +241,13 @@ interface LynvoConflict {
 }
 ```
 
-### LynvoUser / LynvoPresenceUser
+### Presence (`users` in board metadata / `users.json`)
 
 ```typescript
-interface LynvoUser {
-  githubId: string;
-  username: string;
-  avatarUrl?: string;
-}
-
-interface LynvoPresenceUser extends LynvoUser {
-  lastSeenAt: number;  // Unix timestamp, active if within last 5 minutes
-}
+users?: Record<string, number>;  // identity ID -> lastSeenAt (Unix ms), active if within last 5 minutes
 ```
 
-> **Scope note:** `LynvoUser` is the legacy *display* shape, still used for the activity feed `actor`, presence entries and tombstone `deletedBy`. Task `createdBy`/`lastModifiedBy` no longer use it — they store a raw identity ID (see `LynvoIdentity`).
+> **Scope note:** the legacy *display* shape `LynvoUser` (`{ githubId, username, avatarUrl? }`) is fully phased out as of schema 3.0.0. The activity `actor`, the tombstone `deletedBy`, the presence entries and the task `createdBy`/`lastModifiedBy` all store a plain identity ID now (`undefined` = anonymous); display names are resolved from `identities.json` at render time. Boards on an older schema keep the legacy `{ githubId, username }` objects until the user confirms the "Update data" migration, which converts them (matching an existing identity by name/domain, or materializing one).
 
 ### LynvoDomain
 
@@ -294,6 +286,7 @@ interface LynvoIdentity {
 - The "my identity" pointer is stored per-machine in VS Code workspace state (`lynvo.activeIdentityId`), not in the JSON.
 - Display names are case-insensitively unique per project; "Unassigned" is reserved.
 - Tasks reference an identity via `assigneeId` (optional). When absent, the task is unassigned.
+- Tasks also store the identity ID directly in `createdBy`/`lastModifiedBy` (`undefined` = anonymous). Legacy `{ githubId, username }` objects in these fields are auto-converted to identity IDs on load (matched by name/source, or an identity is created) — no manual migration needed.
 
 ## Default Board State
 
@@ -339,14 +332,14 @@ When creating or modifying task files directly, set `createdBy` and `lastModifie
 "lastModifiedBy": "id-m5xk2stu-r1s2t3u4"
 ```
 
-This is the direct-agent attribution convention. Extension-created unauthenticated changes may use `{ "githubId": "unknown", "username": "Unknown" }`, but AI agents should prefer `Lynvo - Agent` so their direct JSON edits are recognizable.
+If you were not given an identity (ad-hoc agent edits), leave both fields unset (absent) — the task is then anonymous. The legacy `{ "githubId": …, "username": … }` object shape is still read: the extension auto-converts it to an identity ID on load (matching an existing identity by display name or source ID, or creating one), so you do not need to migrate it by hand.
 
 ## Agents & Assignees
 
 Identities are the project's known workers — humans or generative agents. A task's `assigneeId` field references an identity's `id`; when absent, the task is unassigned.
 
 **How identities are created:**
-- A **Lynvo user** creates identities through the UI (the *Manage Identities* panel via `lynvo.openIdentities`, or the `lynvo.createIdentity` command) and then communicates the identity's **ID** to the agents. In the panel, the user first **adds a domain** (by typing a name, or by signing in to a third-party provider whose account name becomes the domain — e.g. a GitHub username), then adds identities into a chosen domain (default `local`). Creating an identity does **not** make it current: the user then chooses which identity signs (the *Active* radio in the panel, or `lynvo.setIdentity`). The *current identity* signs `createdBy`/`lastModifiedBy` (stored as its ID, `undefined` when anonymous) and the activity/presence actors for every operation performed through the extension (the legacy display shape `{ "githubId": sourceId, "username": displayName }`).
+- A **Lynvo user** creates identities through the UI (the *Manage Identities* panel via `lynvo.openIdentities`, or the `lynvo.createIdentity` command) and then communicates the identity's **ID** to the agents. In the panel, the user first **adds a domain** (by typing a name, or by signing in to a third-party provider whose account name becomes the domain — e.g. a GitHub username), then adds identities into a chosen domain (default `local`). Creating an identity does **not** make it current: the user then chooses which identity signs (the *Active* radio in the panel, or `lynvo.setIdentity`). The *current identity* signs `createdBy`/`lastModifiedBy` (stored as its ID, `undefined` when anonymous) and the activity `actor`, the tombstone `deletedBy` and the presence entry for every operation performed through the extension — all stored as its identity ID.
 - An **Agent-Manager** may instead create identities by editing `.vscode/lynvo/identities.json` directly (the file holds `{ identities: { … }, domains: { … } }`; add an identity under `identities` keyed by a generated `id-…` ID with `displayName`, `source` (provider: `local`/`github`/`gitlab`), `sourceId` (domain name), `createdAt`, and register the domain under `domains` if it isn't there), commit it, and pass the identity ID to the Agent-Workers.
 
 **Agent-Workers** set the task's `assigneeId` field to the identity ID they were given, e.g. `"assigneeId": "id-m5xk2stu-r1s2t3u4"`.
@@ -455,10 +448,7 @@ Write to `.vscode/lynvo/activity/{activityId}.json`:
   "id": "activity-m5xk2ghi-e5f6g7h8",
   "type": "task_created",
   "message": "Created \"Implement user authentication\"",
-  "actor": {
-    "githubId": "unknown",
-    "username": "Lynvo - Agent"
-  },
+  "actor": "id-m5xk2stu-r1s2t3u4",
   "createdAt": 1716300000000,
   "taskId": "task-m5xk2abc-d7f3g9h1"
 }
@@ -549,7 +539,7 @@ Both **block** comments (`/* */`, `<!-- -->`, `--[[ ]]`) and **single-line** com
 
 Task descriptions support rich markdown rendered by the webview:
 
-```markdown
+````markdown
 - [ ] Unchecked checklist item
 - [x] Completed checklist item
 
@@ -564,7 +554,7 @@ code blocks with language hint
 ```
 
 [Link text](https://example.com) for external links
-```
+````
 
 **Security notes:**
 - Links are sanitized: only `http:`, `https:`, `mailto:`, and `#` anchors allowed
@@ -701,17 +691,18 @@ General rule: non-empty beats empty when the field policy does not decide. Do no
 
 ## Presence System
 
-- Users are tracked in `users.json` with `lastSeenAt` timestamps
+- Presence is tracked in `users.json` as `Record<identityId, lastSeenAt>` (Unix ms); the identity record in `identities.json` carries the display name
 - A user is considered "active" if `lastSeenAt` is within the last 5 minutes
 - Presence is updated via `touchCurrentUser()` on extension activation and every 120 seconds
-- The identifying user is the current identity if one is set, else the GitHub auth session (legacy fallback), else the anonymous `Unknown` user
+- Presence is only recorded when a current identity is set; without one, nothing is marked as present
 
 ## Activity Feed
 
 - Activity entries are stored as individual files in `activity/`
 - Maximum 500 entries are kept (oldest are pruned on save)
 - Entries are sorted by `createdAt` descending for display
-- Filterable by activity type and actor username in the UI
+- `actor` stores an identity ID (`identities.json`); missing ID means anonymous
+- Filterable by activity type and actor (identity display name) in the UI
 
 ## Webview Views
 
@@ -850,7 +841,7 @@ Also create the matching activity:
   "id": "activity-{id}",
   "type": "task_created",
   "message": "Created \"Plan: <feature or fix name>\"",
-  "actor": { "githubId": "unknown", "username": "Lynvo - Agent" },
+  "actor": "id-<identityId>",
   "createdAt": <now>,
   "taskId": "task-{id}"
 }
@@ -872,7 +863,7 @@ As you complete each step:
   "id": "activity-{id}",
   "type": "checklist_updated",
   "message": "Completed checklist item in \"Plan: <feature or fix name>\"",
-  "actor": { "githubId": "unknown", "username": "Lynvo - Agent" },
+  "actor": "id-<identityId>",
   "createdAt": <now>,
   "taskId": "task-{id}"
 }

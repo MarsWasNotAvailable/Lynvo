@@ -340,5 +340,6 @@
   "Label names cannot contain spaces or the # symbol.": "Label names cannot contain spaces or the # symbol.",
   "Label names must be a single word or a compact token (e.g. UI, R&D, CI-CD). Spaces and the # symbol are not allowed.": "Label names must be a single word or a compact token (e.g. UI, R&D, CI-CD). Spaces and the # symbol are not allowed.",
   "All columns": "All columns",
-  "Filter workforce metrics by column": "Filter workforce metrics by column"
+  "Filter workforce metrics by column": "Filter workforce metrics by column",
+  "Anonymous": "Anonymous"
 }

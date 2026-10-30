@@ -1,13 +1,3 @@
-export interface LynvoUser {
-  githubId: string;
-  username: string;
-  avatarUrl?: string;
-}
-
-export interface LynvoPresenceUser extends LynvoUser {
-  lastSeenAt: number;
-}
-
 /**
  * A reserved, baked-in Skill that is NOT a label.
  * It marks an identity as a "jack-of-all-trades",
@@ -136,7 +126,8 @@ export interface LynvoActivity {
   type: LynvoActivityType;
   message: string;
   createdAt: number;
-  actor: LynvoUser;
+  /** Identity ID (stored in identities.json) that performed the action; undefined = anonymous. */
+  actor?: string;
   taskId?: string;
   targetTaskId?: string;
   metadata?: Record<string, string | number | boolean | null>;
@@ -166,7 +157,8 @@ export interface LynvoTombstone {
   entityType: "task" | "column" | "label";
   entityId: string;
   deletedAt: number;
-  deletedBy: LynvoUser;
+  /** Identity ID (stored in identities.json) that deleted the entity; undefined = anonymous. */
+  deletedBy?: string;
 }
 
 export interface LynvoConflict {
@@ -207,7 +199,8 @@ export interface LynvoBoard {
   columns: Record<string, LynvoColumn>;
   tasks: Record<string, LynvoTask>;
   labels?: Record<string, LynvoLabel>;
-  users?: Record<string, LynvoPresenceUser>;
+  /** Presence: identity ID (identities.json) -> lastSeenAt (Unix ms). */
+  users?: Record<string, number>;
   identities?: Record<string, LynvoIdentity>;
   domains?: Record<string, LynvoDomain>;
   activity?: Record<string, LynvoActivity>;

@@ -538,8 +538,8 @@ export function activate(context: vscode.ExtensionContext) {
           // Use the GitHub auth session to pre-fill name and handle.
           const user = await AuthProvider.getGitHubUser({ createIfNone: true });
           if (!user) {return;}
-          displayName = user.username;
-          sourceId = user.githubId;
+          displayName = user.label;
+          sourceId = user.id;
           break;
         }
 

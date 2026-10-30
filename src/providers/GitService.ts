@@ -15,7 +15,6 @@ import {
   LynvoDomain,
   LynvoIdentity,
   LynvoLabel,
-  LynvoPresenceUser,
   LynvoSyncMetadata,
   LynvoTask,
   LynvoTombstone,
@@ -206,7 +205,7 @@ export class GitService {
 
     const metadata = await this.readJson<BoardMetadata>(boardPath);
     const columns = await this.readJson<Record<string, LynvoColumn>>(columnsPath);
-    const users = await this.readOptionalJson<Record<string, LynvoPresenceUser>>(
+    const users = await this.readOptionalJson<Record<string, number>>(
       usersPath,
       {},
     );
