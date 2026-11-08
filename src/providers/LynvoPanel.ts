@@ -19,13 +19,16 @@ import {
 } from "../types";
 import {
   findMarkerLineIndex,
+  formatAssigneeRef,
   isInCodeEditingEnabled,
   readTodoComment,
   removeTodoCommentRelationsFromFile,
   removeDanglingRelationFromFile,
+  removeDanglingAssigneeFromFile,
   removeMarkerFromFile,
   removeTodoCommentFromFile,
   replaceTodoComment,
+  resolveIdentityRef,
   resolveRelationTarget,
 } from "./TodoTracker";
 import type { TodoBodyChecklistItem, TodoCommentPayload } from "./TodoTracker";
@@ -95,8 +98,15 @@ async function computeCodeLinkStates(
             targetId: relation.targetTaskId,
           })),
         );
+      // Assignee: compare by resolved identity id (not raw string) so that the
+      // name-form vs id-form do not produce false divergence.
+      const codeAssigneeId =
+        parsed.assignee !== undefined
+          ? resolveIdentityRef(board, parsed.assignee)?.id
+          : undefined;
+      const assigneeMatches = codeAssigneeId === (task.assigneeId || undefined);
       states[task.id] =
-        titleMatches && descriptionMatches && checklistMatches && relationsMatch
+        titleMatches && descriptionMatches && checklistMatches && relationsMatch && assigneeMatches
           ? "synced"
           : "diverged";
     }),
@@ -380,6 +390,21 @@ const fullRelationLines = (
     targetTaskId: relation.targetTaskId,
   }));
 
+/** The render-ready `[@]` assignee line for a task (canonical `id-... "name@domain"`), or undefined. */
+const fullAssigneeLine = (board: LynvoBoard, taskId: string): string | undefined => {
+  const identityId = board.tasks[taskId]?.assigneeId;
+  if (!identityId) {return undefined;}
+  const identity = board.identities?.[identityId];
+  return identity ? formatAssigneeRef(identity) : identityId;
+};
+
+/** The render-ready `[@]` assignee line for a given identity id (the desired value), or undefined. */
+const assigneeLineForIdentity = (board: LynvoBoard, identityId: string | undefined): string | undefined => {
+  if (!identityId) {return undefined;}
+  const identity = board.identities?.[identityId];
+  return identity ? formatAssigneeRef(identity) : identityId;
+};
+
 const CODE_SYNC_ERROR =
   "Could not write to the linked code file. The board was not updated — fix the file and try again.";
 
@@ -398,6 +423,7 @@ async function syncLinkedTaskToCode(
     description?: string;
     checklist?: TodoBodyChecklistItem[];
     relations?: BoardRelation[];
+    assignee?: string;
   },
 ): Promise<boolean> {
   const task = board.tasks[taskId];
@@ -412,6 +438,9 @@ async function syncLinkedTaskToCode(
     override?.checklist ??
     (task.checklist || []).map((entry) => ({ text: entry.text, done: entry.done }));
   const relations = override?.relations ?? fullRelationLines(board, taskId);
+  const assignee = override?.assignee !== undefined
+    ? override.assignee
+    : fullAssigneeLine(board, taskId);
   const payload: TodoCommentPayload = {
     title: override?.title ?? task.title,
     description: override?.description ?? task.description,
@@ -420,6 +449,7 @@ async function syncLinkedTaskToCode(
       type: relation.type,
       target: `${relation.targetTaskId} {${board.tasks[relation.targetTaskId]?.title || relation.targetTaskId}}`,
     })),
+    assignee,
   };
   return await replaceTodoComment(filePath, todoId, payload);
 }
@@ -694,13 +724,34 @@ export class LynvoPanel {
             if (!taskId) {
               return;
             }
+            const board = await DataManager.loadBoard();
+            const task = board?.tasks[taskId];
+            if (!task) {
+              return;
+            }
+            // For a linked task, the `[@]` assignee line is bound to the code comment :
+            // write the desired assignee to the code BEFORE committing the board, so that
+            // a failing write leaves no partial state (the user can fix and retry).
+            const isLinked = Boolean(
+              task.codeReference?.todoId &&
+              task.codeReference?.filePath &&
+              isSafeWorkspaceRelativePath(task.codeReference.filePath),
+            );
+            if (isLinked && task.assigneeId !== identityId) {
+              const ok = await syncLinkedTaskToCode(board!, taskId, {
+                assignee: assigneeLineForIdentity(board!, identityId),
+              });
+              if (!ok) {
+                vscode.window.showErrorMessage(t(CODE_SYNC_ERROR));
+                return;
+              }
+            }
             await DataManager.assignTask(taskId, identityId);
             LynvoPanel.refreshDataAndScheduleSync();
             return;
           }
           case "addIdentity": {
             const displayName = asString(message.displayName) || "";
-            const source = asString(message.source) || "local";
             const sourceId = asString(message.sourceId) || "";
             const board = await DataManager.loadBoard();
             const identities = board?.identities || {};
@@ -717,6 +768,10 @@ export class LynvoPanel {
               });
               return;
             }
+            // The source (provider) is deduced from the selected domain :
+            // a remote domain carries its provider (e.g. "github"),
+            // a text-based domain is "local".
+            const source = board?.domains?.[sourceId.trim()]?.provider || "local";
             const identity = await DataManager.createIdentity(displayName, source, sourceId);
             // Optionally make the newly-created identity the active one right away.
             if (message.setActive === true) {
@@ -788,6 +843,44 @@ export class LynvoPanel {
             }
 
             await DataManager.removeDomain(name, keepIdentitiesLocal);
+            // When identities were deleted (keepIdentitiesLocal=false), clean up their
+            // `[@]` assignee lines in any linked tasks that still reference them.
+            if (!keepIdentitiesLocal) {
+              const deletedIds = new Set(
+                Object.values(board?.identities || {})
+                  .filter((identity) => identity.sourceId === name)
+                  .map((identity) => identity.id),
+              );
+              // Note: after removeDomain, the board no longer has these identities,
+              // but tasks that had them as assignee now have assigneeId cleared.
+              // We still need to clean up the in-code `[@]` lines by identity id.
+              const freshBoard = await DataManager.loadBoard();
+              const linkedTasks = Object.values(freshBoard?.tasks || {})
+                .filter((task) =>
+                  task.codeReference?.todoId &&
+                  task.codeReference?.filePath &&
+                  isSafeWorkspaceRelativePath(task.codeReference.filePath),
+                );
+              const failedFiles: string[] = [];
+              for (const task of linkedTasks) {
+                // Check if this task's in-code `[@]` line references one of the deleted identities.
+                for (const deletedId of deletedIds) {
+                  if (!await removeDanglingAssigneeFromFile(
+                    task.codeReference!.filePath!,
+                    task.codeReference!.todoId!,
+                    deletedId,
+                  )) {
+                    failedFiles.push(task.codeReference!.filePath!);
+                    break;
+                  }
+                }
+              }
+              if (failedFiles.length > 0) {
+                vscode.window.showWarningMessage(
+                  t("Some in-code assignee lines could not be cleaned: {0}", failedFiles.join(", ")),
+                );
+              }
+            }
             // If the active identity was deleted along with the domain, clear the pointer.
             if (DataManager.getActiveIdentityId() === undefined) {
               await LynvoPanel.persistIdentity(undefined);
@@ -872,7 +965,33 @@ export class LynvoPanel {
             if (!identityId) {
               return;
             }
+            // Capture linked tasks assigned to this identity BEFORE deletion,
+            // so that we can clean up their in-code `[@]` line afterwards.
+            const boardBefore = await DataManager.loadBoard();
+            const linkedAssignees = Object.values(boardBefore?.tasks || {})
+              .filter((task) =>
+                task.assigneeId === identityId &&
+                task.codeReference?.todoId &&
+                task.codeReference?.filePath &&
+                isSafeWorkspaceRelativePath(task.codeReference.filePath),
+              )
+              .map((task) => ({
+                filePath: task.codeReference!.filePath!,
+                todoId: task.codeReference!.todoId!,
+              }));
             await DataManager.removeIdentity(identityId);
+            // Best-effort cleanup of the `[@]` assignee line in linked tasks.
+            const failedFiles: string[] = [];
+            for (const ref of linkedAssignees) {
+              if (!await removeDanglingAssigneeFromFile(ref.filePath, ref.todoId, identityId)) {
+                failedFiles.push(ref.filePath);
+              }
+            }
+            if (failedFiles.length > 0) {
+              vscode.window.showWarningMessage(
+                t("Some in-code assignee lines could not be cleaned: {0}", failedFiles.join(", ")),
+              );
+            }
             // If the removed identity was the current pointer, persist the cleared pointer.
             if (DataManager.getActiveIdentityId() === undefined) {
               await LynvoPanel.persistIdentity(undefined);
@@ -1074,6 +1193,22 @@ export class LynvoPanel {
               title ? `${taskId} {${title}}` : taskId,
             );
             vscode.window.showInformationMessage(t("Task ID copied to clipboard."));
+            return;
+          }
+          case "copyIdentity": {
+            const identityId = asString(message.identityId);
+            if (!identityId) {
+              return;
+            }
+            const displayName = asString(message.displayName);
+            const sourceId = asString(message.sourceId);
+            // Copy the Lynvo reference form: `id-... "displayName@domain"`.
+            await vscode.env.clipboard.writeText(
+              displayName && sourceId
+                ? `${identityId} "${displayName}@${sourceId}"`
+                : identityId,
+            );
+            vscode.window.showInformationMessage(t("Identity copied to clipboard."));
             return;
           }
           case "deleteTask": {
@@ -1617,6 +1752,22 @@ export class LynvoPanel {
             }
             for (const additive of plan.edgeToAdd) {
               await DataManager.addTaskRelation(taskId, additive.targetTaskId, additive.type);
+            }
+
+            // Assignee: make the board match what the code currently holds.
+            // The code is the source of truth for a re-sync.
+            const boardForAssignee = await DataManager.loadBoard();
+            const currentAssigneeId = boardForAssignee?.tasks[taskId]?.assigneeId;
+            if (parsed.assignee === undefined) {
+              if (currentAssigneeId) {
+                await DataManager.assignTask(taskId, undefined);
+              }
+            } else {
+              const resolvedIdentity = resolveIdentityRef(boardForAssignee!, parsed.assignee);
+              if (resolvedIdentity && resolvedIdentity.id !== currentAssigneeId) {
+                await DataManager.assignTask(taskId, resolvedIdentity.id);
+              }
+              // Unresolvable: leave the board unchanged (stays diverged, user can fix the code).
             }
 
             // `blocks`/`blocked-by` are reciprocal and render on BOTH comments,

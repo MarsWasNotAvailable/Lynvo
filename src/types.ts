@@ -119,7 +119,12 @@ export type LynvoActivityType =
   | "relation_blockedby_added"
   | "relation_blockedby_deleted"
   | "relation_duplicates_added"
-  | "relation_duplicates_deleted";
+  | "relation_duplicates_deleted"
+  | "identity_created"
+  | "identity_renamed"
+  | "identity_deleted"
+  | "domain_created"
+  | "domain_deleted";
 
 export interface LynvoActivity {
   id: string;

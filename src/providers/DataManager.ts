@@ -945,7 +945,7 @@ export class DataManager {
     return run;
   }
 
-  public static async touchCurrentUser(): Promise<void> {
+  public static async updateUserPresence(): Promise<void> {
     const run = this.writeQueue.catch(() => undefined).then(async () => {
       const board = await this.loadBoardUnsafe();
       if (!board) {
@@ -1052,6 +1052,7 @@ export class DataManager {
     dueDate?: number,
     checklist: Array<{ text: string; done: boolean }> = [],
     relations: Array<{ type: LynvoTaskRelationType; targetTaskId: string }> = [],
+    assigneeId?: string,
   ): Promise<string> {
     let newTaskId = "";
     await this.mutateBoard(async (board) => {
@@ -1138,6 +1139,8 @@ export class DataManager {
           updatedAt: now,
         })),
         relations: ownRelations,
+        // Identity ID from an in-code `[@]` line (omitted from the JSON when absent).
+        assigneeId: assigneeId || undefined,
       };
       this.addActivity( board, "task_created", `{${title}}`, instigator, { taskId } );
       // Log each relation added during promotion (parity with addTaskRelation):
@@ -1765,6 +1768,8 @@ export class DataManager {
           board.domains[domain] = { name: domain, createdAt: Date.now() };
         }
       }
+      const instigator = await this.getSigningIdentity(board);
+      this.addActivity(board, "identity_created", `${name}@${domain}`, instigator);
     });
 
     return identity;
@@ -1786,6 +1791,12 @@ export class DataManager {
     await this.mutateBoard(async (board) => {
       board.domains = board.domains || {};
       board.domains[domainName] = newDomain;
+      const instigator = await this.getSigningIdentity(board);
+      this.addActivity(
+        board, "domain_created",
+        `${domainName}`,
+        instigator,
+      );
     });
     return newDomain;
   }
@@ -1811,6 +1822,12 @@ export class DataManager {
       }
       delete board.domains[dom];
 
+      const instigator = await this.getSigningIdentity(board);
+      this.addActivity(
+          board, "domain_deleted",
+          `${dom}`,
+          instigator,
+        );
       const affected = Object.values(board.identities || {}).filter(
         (identity) => identity.sourceId === dom,
       );
@@ -1824,6 +1841,11 @@ export class DataManager {
       } else {
         // Delete the domain's identities and unassign any tasks that pointed at them.
         affected.forEach((identity) => {
+          this.addActivity(
+            board, "identity_deleted",
+            `${identity.displayName}@${identity.sourceId || "local"}`,
+            instigator,
+          );
           if (board.identities) {delete board.identities[identity.id];}
           Object.values(board.tasks).forEach((task) => {
             if (task.assigneeId === identity.id) {
@@ -1874,7 +1896,16 @@ export class DataManager {
       const identity = board.identities?.[identityId];
       if (!identity) {return;}
       const trimmed = displayName.trim();
-      if (trimmed) {identity.displayName = trimmed;}
+      if (!trimmed || trimmed === identity.displayName) {return;}
+      const previousName = identity.displayName;
+      identity.displayName = trimmed;
+      const instigator = await this.getSigningIdentity(board);
+      const domain = identity.sourceId || "local";
+      this.addActivity(
+        board, "identity_renamed",
+        `${previousName}@${domain} ==> ${trimmed}@${domain}`,
+        instigator,
+      );
     });
   }
 
@@ -1911,7 +1942,16 @@ export class DataManager {
   public static async removeIdentity(identityId: string): Promise<void> {
     await this.mutateBoard(async (board) => {
       if (!board.identities?.[identityId]) {return;}
+      // Resolve the instigator before deletion so that deleting the active
+      // identity still signs the activity with its own name.
+      const instigator = await this.getSigningIdentity(board);
+      const removed = board.identities[identityId];
       delete board.identities[identityId];
+      this.addActivity(
+        board, "identity_deleted",
+        `${removed.displayName}@${removed.sourceId || "local"}`,
+        instigator,
+      );
       // Clear dangling assignees on tasks that referenced the removed identity.
       Object.values(board.tasks).forEach((task) => {
         if (task.assigneeId === identityId) {

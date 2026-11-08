@@ -379,7 +379,7 @@ If a task's `status` references a deleted column, it is reassigned to the leftmo
 | Command | Purpose |
 |---|---|
 | `lynvo.quickCreateTask` | Create task via interactive input prompts |
-| `lynvo.promoteTodo` | Promote selected TODO/IDEA/FIXME comments into tasks (each gets a unique marker + `codeReference.todoId`); the comment body is captured as the task's editable description, and any `[ ]`/`[x]` checklist items and `[!]`/`[&]`/`[|]`/`[=]` relation lines become the task's checklist and relations |
+| `lynvo.promoteTodo` | Promote selected TODO/IDEA/FIXME comments into tasks (each gets a unique marker + `codeReference.todoId`); the comment body is captured as the task's editable description, any `[ ]`/`[x]` checklist items and `[!]`/`[&]`/`[|]`/`[=]` relation lines become the task's checklist and relations, and a `[@]` identity line sets the task's assignee |
 | `lynvo.openBoard` | Open the Kanban board webview |
 | `lynvo.openTable` | Open the table view webview |
 | `lynvo.openActivity` | Open the activity feed webview |
@@ -505,6 +505,7 @@ The comment body (the lines after the title line) may contain plain description 
 
 - **Checklist** — `[ ]` unchecked, `[x]` checked.
 - **Relations** — `[!]` blocked-by, `[&]` related, `[|]` blocks, `[=]` duplicates. The target is a task, written as `{Title}` (matched case-insensitively); a bare task id or another task's `lynvo-todo-…` marker is also accepted. On promotion each relation line is rewritten to `task-id {Title}` so the link stays reliable after renames. Note: `[|]` (blocks) and `[!]` (blocked-by) denote the **same edge** — `[|] {B}` on task A means "A blocks B" and is stored as `blocked-by → A` **on B**; a task's comment shows its **full** relation set (own stored + derived `blocks`), so one edge can appear in two tasks' comments.
+- **Assignee** — `[@]` assigns the task to an identity. Write the identity id (e.g. `id-mui91xuv-khio0nfq`), optionally followed by the cosmetic `"displayName@domain"` (e.g. `id-mui91xuv-khio0nfq "john@acme"`), or just the `"displayName@domain"` pair (matched case-insensitively). The line is **two-way bound** (like checklist and relations): it is rendered in canonical form in the promoted comment and kept in sync on board edits. A task takes **at most one** assignee; a comment with several `[@]` lines is **rejected at promotion** — remove the extras and re-promote. If the identity cannot be resolved, that TODO is **not promoted** — fix the line and re-promote.
 
 Example (block comment):
 
@@ -516,6 +517,7 @@ Example (block comment):
 * [x] Checklist item that has been completed
 * [!] task-mtlcf182-jgtw9fuw {Fix Renderer}
 * [&] task-mto3l42t-5jicqd1n {Another Task}
+* [@] id-mui91xuv-khio0nfq "john@acme"
 */
 ```
 
@@ -693,7 +695,7 @@ General rule: non-empty beats empty when the field policy does not decide. Do no
 
 - Presence is tracked in `users.json` as `Record<identityId, lastSeenAt>` (Unix ms); the identity record in `identities.json` carries the display name
 - A user is considered "active" if `lastSeenAt` is within the last 5 minutes
-- Presence is updated via `touchCurrentUser()` on extension activation and every 120 seconds
+- Presence is updated via `updateUserPresence()` on extension activation and every 120 seconds
 - Presence is only recorded when a current identity is set; without one, nothing is marked as present
 
 ## Activity Feed

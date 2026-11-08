@@ -5,13 +5,15 @@ import { DataManager } from "./providers/DataManager";
 import { LynvoMenuProvider } from "./providers/LynvoMenuProvider";
 import { GitService } from "./providers/GitService";
 import { SkillInstaller } from "./providers/SkillInstaller";
-import { CodeReference } from "./types";
+import { CodeReference, LynvoIdentity } from "./types";
 import {
   buildPromotedComment,
+  formatAssigneeRef,
   generateTodoId,
   isTodoCommentLine,
   lineHasMarker,
   parseTodoSelection,
+  resolveIdentityRef,
   resolveRelationTarget,
   getTodoCommentEndIndex,
   saveDocument,
@@ -117,6 +119,7 @@ async function promoteTodo(): Promise<void> {
      todoId: string;
      payload: TodoCommentPayload;
      resolvedRelations: TodoBodyRelation[];
+     resolvedAssignee?: LynvoIdentity;
    };
    const prepared: PreparedTodo[] = candidates.map((candidate) => ({
      lineIndex: candidate.lineIndex,
@@ -162,8 +165,23 @@ async function promoteTodo(): Promise<void> {
    };
    const created: PreparedTodo[] = [];
    // Stores metadata about tasks skipped due to failing to resolve a target.
-   const skipped: Array<{ title: string; target: string }> = [];
+   const skipped: Array<{ title: string; target: string; reason: "relation" | "identity"; note?: string }> = [];
    for (const item of prepared) {
+     // A task takes at most one assignee; several `[@]` lines are rejected outright.
+     if (item.payload.assigneeMultiple) {
+       skipped.push({ title: item.payload.title, target: "", reason: "identity", note: "multiple assignees" });
+       continue;
+     }
+     // Resolve the optional `[@]` assignee against the board's identities;
+     // an unresolvable reference stops the promotion (so the user can fix the code).
+     if (item.payload.assignee !== undefined) {
+       const assignee = resolveIdentityRef(board, item.payload.assignee);
+       if (!assignee) {
+         skipped.push({ title: item.payload.title, target: item.payload.assignee, reason: "identity" });
+         continue;
+       }
+       item.resolvedAssignee = assignee;
+     }
      // Resolve each relation against existing board tasks, then this batch's earlier tasks.
      let unresolvedTarget: string | undefined;
      const resolvedRelations: TodoBodyRelation[] = [];
@@ -177,7 +195,7 @@ async function promoteTodo(): Promise<void> {
        resolvedRelations.push({ type: relation.type, target: `${target.taskId} {${target.title}}` });
      }
      if (unresolvedTarget !== undefined) {
-       skipped.push({ title: item.payload.title, target: unresolvedTarget });
+       skipped.push({ title: item.payload.title, target: unresolvedTarget, reason: "relation" });
        continue;
      }
      const newId = await DataManager.createTask(
@@ -193,16 +211,29 @@ async function promoteTodo(): Promise<void> {
          type: relation.type,
          targetTaskId: relation.target.split(" ")[0],
        })),
+       item.resolvedAssignee?.id,
      );
      registry.set(item.payload.title.trim().toLowerCase(), { taskId: newId, title: item.payload.title });
      item.resolvedRelations = resolvedRelations;
      created.push(item);
    }
 
+   const skippedDetails = skipped
+     .map((entry) => {
+       if (entry.reason === "identity") {
+         if (entry.note) {
+           return `"${entry.title}" -> ${entry.note}`;
+         }
+         return `"${entry.title}" -> identity ${entry.target} not found`;
+       }
+       return `"${entry.title}" -> ${entry.target}`;
+     })
+     .join(", ");
+   const hasIdentitySkip = skipped.some((entry) => entry.reason === "identity");
    if (created.length === 0) {
-     const details = skipped.map((entry) => `"${entry.title}" -> ${entry.target}`).join(", ");
      vscode.window.showErrorMessage(
-       t("Could not promote any TODO: {0}. A task can only reference tasks listed above it.", details),
+        `${t("Could not promote any TODO: {0}.", skippedDetails)}`
+        + `${ hasIdentitySkip ? "" : t("A task can only reference tasks listed above it.")}`,
      );
      return;
    }
@@ -229,6 +260,7 @@ async function promoteTodo(): Promise<void> {
            description: item.payload.description,
            checklist: item.payload.checklist,
            relations: item.resolvedRelations,
+           assignee: item.resolvedAssignee ? formatAssigneeRef(item.resolvedAssignee) : undefined,
          },
        );
        edit.replace(editor.document.uri, range, newLines.join("\n"));
@@ -278,10 +310,10 @@ async function promoteTodo(): Promise<void> {
    if (created.length === total) {
      vscode.window.showInformationMessage(t("{0} TODO(s) promoted to Lynvo tasks.", created.length));
    } else {
-     const details = skipped.map((entry) => `"${entry.title}" -> ${entry.target}`).join(", ");
      vscode.window.showWarningMessage(
-       t("Promoted {0} of {1} TODO(s). Skipped reasons : {2}. A task can only reference tasks listed above it.", created.length, total, details),
-     );
+       `${t("Promoted {0} of {1} TODO(s). Skipped reasons : {2}.", created.length, total, skippedDetails)}`
+        + `${ hasIdentitySkip ? "" : t("A task can only reference tasks listed above it.")}`,
+    );
    }
    LynvoPanel.refreshData();
    GitService.scheduleBoardSync();
@@ -416,7 +448,7 @@ export function activate(context: vscode.ExtensionContext) {
     await DataManager.initializeBoard().catch((err) =>
       console.error("Lynvo Init Error:", err),
     );
-    await DataManager.touchCurrentUser().catch((err) =>
+    await DataManager.updateUserPresence().catch((err) =>
       console.error("Lynvo Presence Error:", err),
     );
   })();
@@ -435,7 +467,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(treeDataRegistration);
   context.subscriptions.push(boardWatcher);
   const autoSyncInterval = setInterval(async () => {
-    await DataManager.touchCurrentUser().catch((err) =>
+    await DataManager.updateUserPresence().catch((err) =>
       console.error("Lynvo Presence Error:", err),
     );
     // Periodically check for remote updates to pull (detection only, no push).

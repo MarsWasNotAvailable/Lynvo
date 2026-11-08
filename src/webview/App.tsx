@@ -81,7 +81,8 @@ type WebviewOutboundMessage =
   | { command: "convertBrokenTask"; taskId: string }
   | { command: "removeCodeRefsForColumn"; colId: string }
   | { command: "assignTask"; taskId: string; identityId?: string }
-  | { command: "addIdentity"; displayName: string; source: string; sourceId: string; setActive?: boolean }
+  | { command: "addIdentity"; displayName: string; sourceId: string; setActive?: boolean }
+  | { command: "copyIdentity"; identityId: string; displayName: string; sourceId: string }
   | { command: "addLocalDomain"; name: string }
   | { command: "removeDomain"; name: string }
   | { command: "addRemoteDomain"; provider: string }
@@ -149,7 +150,7 @@ const SaveIcon = () => (
   </svg>
 );
 
-// Clipboard glyph for the "Copy Task ID" action.
+// Clipboard glyph for the "Copy Task ID" and "Copy Identity" actions.
 const ClipboardIcon = () => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -1192,7 +1193,6 @@ export const App: React.FC = () => {
   // Identity management (Manage Identities panel).
   const [activeIdentityId, setActiveIdentityId] = useState<string | undefined>(undefined);
   const [newIdentityName, setNewIdentityName] = useState("");
-  const [newIdentitySource, setNewIdentitySource] = useState("local");
   const [newIdentityDomain, setNewIdentityDomain] = useState("local");
   // Whether the newly-created identity should become the active one right away.
   const [newIdentitySetActive, setNewIdentitySetActive] = useState(false);
@@ -1373,7 +1373,6 @@ export const App: React.FC = () => {
           setDomainName("");
           setDomainInputType("text");
           setNewIdentityName("");
-          setNewIdentitySource("local");
           setNewIdentityDomain("local");
           setNewIdentitySetActive(false);
           setEditingIdentityId(null);
@@ -1545,8 +1544,9 @@ export const App: React.FC = () => {
   // legacy `{ githubId, username }` objects; fall back to the legacy username.
   const actorDisplayName = (actor: unknown): string => {
     if (typeof actor === "string") {
-      // A dangling ID (identity removed) is shown as-is rather than fake-anonymous.
-      return boardData?.identities?.[actor]?.displayName || actor;
+      // Either we have a record of the identity, or it's a dangling ID after removal;
+      // We show the removed identity with a Dagger symbol rather than fake-anonymous.
+      return boardData?.identities?.[actor]?.displayName || `† ${actor}`;
     }
     if (actor && typeof actor === "object") {
       const username = (actor as { username?: unknown }).username;
@@ -3087,9 +3087,14 @@ export const App: React.FC = () => {
       }
       if (skillFilterIds.length === 0) {return true;}
       const skills = identity.skills || [];
-      if (skillFilterMode === "and") {return skillFilterIds.every((skillId) => skills.includes(skillId));}
-      if (skillFilterMode === "not") {return skillFilterIds.every((skillId) => !skills.includes(skillId));}
-      return skillFilterIds.some((skillId) => skills.includes(skillId));
+      switch (skillFilterMode) {
+        case "and":
+          return skillFilterIds.every((skillId) => skills.includes(skillId));
+        case "not":
+          return skillFilterIds.every((skillId) => !skills.includes(skillId));
+        default: //or
+          skillFilterIds.some((skillId) => skills.includes(skillId))
+      }
     });
 
     // Rank for the "recently active" sort: the current active identity is rank 0,
@@ -3109,13 +3114,17 @@ export const App: React.FC = () => {
       filteredIdentities
       .sort((a, b) => {
         let cmp;
-        if (identitySortKey === "added") {
-          cmp = a.createdAt - b.createdAt;
-        } else if (identitySortKey === "recent") {
-          cmp = recentRank(a.id) - recentRank(b.id);
-        } else if (identitySortKey === "domain") {
-          cmp = a.sourceId.localeCompare(b.sourceId, undefined, { sensitivity: "base" });
-        } else {
+        switch (identitySortKey) {
+          case "added":
+            cmp = a.createdAt - b.createdAt;
+            break;
+          case "recent":
+            cmp = recentRank(a.id) - recentRank(b.id);
+            break;
+          case "domain":
+            cmp = a.sourceId.localeCompare(b.sourceId, undefined, { sensitivity: "base" });
+            break;
+          default:
           cmp = a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
         }
         if (cmp === 0) {
@@ -3173,7 +3182,6 @@ export const App: React.FC = () => {
       vscode.postMessage({
         command: "addIdentity",
         displayName: newIdentityName.trim(),
-        source: newIdentitySource,
         sourceId: newIdentityDomain,
         setActive: newIdentitySetActive,
       });
@@ -3224,7 +3232,7 @@ export const App: React.FC = () => {
     const colUsage: React.CSSProperties = { flex: "0 0 56px" };
     const colSkills: React.CSSProperties = { flex: "0 0 84px", textAlign: "center" };
     const colActive: React.CSSProperties = { flex: "0 0 52px" };
-    const colActions: React.CSSProperties = { flex: "0 0 78px" };
+    const colActions: React.CSSProperties = { flex: "0 0 92px" };
     const row: React.CSSProperties = {
       display: "flex",
       alignItems: "center",
@@ -3776,6 +3784,7 @@ export const App: React.FC = () => {
                     </>
                   ) : (
                     <>
+                      <button type="button" className="icon-btn" style={iconButtonStyle} title={t("Copy Identity ID")} aria-label={t("Copy Identity ID")} onClick={() => vscode.postMessage({ command: "copyIdentity", identityId: identity.id, displayName: identity.displayName, sourceId: identity.sourceId })}><ClipboardIcon /></button>
                       <button type="button" className="icon-btn" style={iconButtonStyle} title={t("Edit name")} aria-label={t("Edit name")} onClick={() => { setEditingIdentityId(identity.id); setEditIdentityName(identity.displayName); setIdentityError(""); }}><EditIcon /></button>
                       <button type="button" className="icon-btn delete" style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }} title={t("Remove")} aria-label={t("Remove")} onClick={() => vscode.postMessage({ command: "removeIdentity", identityId: identity.id })}><DeleteIcon /></button>
                     </>
@@ -3808,17 +3817,7 @@ export const App: React.FC = () => {
               />
             </div>
             <div style={colId} />
-            <div style={colSource}>
-              <select
-                value={newIdentitySource}
-                onChange={(e) => setNewIdentitySource(e.target.value)}
-                style={{ width: "100%", padding: "5px" }}
-                aria-label={t("Source")}
-              >
-                <option value="local">{t("Local")}</option>
-                <option value="github">GitHub</option>
-              </select>
-            </div>
+            <div style={colSource} />
             <div style={colDomain}>
               <select
                 value={newIdentityDomain}

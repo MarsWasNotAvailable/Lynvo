@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { LynvoBoard, LynvoTaskRelationType } from "../types";
+import type { LynvoBoard, LynvoIdentity, LynvoTaskRelationType } from "../types";
 
 /**
  * Keywords (case-sensitive) that mark a source line as promotable into a Lynvo task.
@@ -355,6 +355,10 @@ export interface TodoCommentPayload {
   description: string;
   checklist: TodoBodyChecklistItem[];
   relations: TodoBodyRelation[];
+  /** Canonical `[@]` assignee reference, e.g. `id-... "name@domain"` (undefined = none). */
+  assignee?: string;
+  /** True when the comment declared several `[@]` lines (a task takes at most one assignee). */
+  assigneeMultiple?: boolean;
 }
 
 /** Relation marker character -> relation type. */
@@ -373,12 +377,14 @@ const RELATION_TYPE_TO_MARKER = Object.fromEntries(
 
 const CHECKLIST_LINE = /^\[(\s|x|X)\]\s?(.*)$/;
 const RELATION_LINE = /^\[([!&|=])\]\s?(.*)$/;
+const IDENTITY_LINE = /^\[@\]\s?(.*)$/;
 
-/** Classify one stripped body line into description / checklist / relation. */
+/** Classify one stripped body line into description / checklist / relation / identity. */
 function classifyBodyLine(line: string):
   | { kind: "description"; text: string }
   | { kind: "checklist"; text: string; done: boolean }
-  | { kind: "relation"; type: LynvoTaskRelationType; target: string } {
+  | { kind: "relation"; type: LynvoTaskRelationType; target: string }
+  | { kind: "identity"; ref: string } {
   const checklist = line.match(CHECKLIST_LINE);
   if (checklist) {
     return { kind: "checklist", text: checklist[2].trim(), done: checklist[1] !== " " };
@@ -390,26 +396,40 @@ function classifyBodyLine(line: string):
       return { kind: "relation", type, target: relation[2].trim() };
     }
   }
+  const identity = line.match(IDENTITY_LINE);
+  if (identity) {
+    return { kind: "identity", ref: identity[1].trim() };
+  }
   return { kind: "description", text: line };
 }
 
-/** Parse stripped body lines into description + checklist + relations. */
+/** Parse stripped body lines into description + checklist + relations + assignee. */
 function parseBodyLines(bodyLines: string[]): Omit<TodoCommentPayload, "title"> {
   const descriptionLines: string[] = [];
   const checklist: TodoBodyChecklistItem[] = [];
   const relations: TodoBodyRelation[] = [];
+  const assigneeLines: string[] = [];
   for (const raw of bodyLines) {
     const line = raw.trim();
     if (line.length === 0) {continue;}
     const classified = classifyBodyLine(line);
     if (classified.kind === "description") {descriptionLines.push(classified.text);}
     else if (classified.kind === "checklist") {checklist.push({ text: classified.text, done: classified.done });}
-    else {relations.push({ type: classified.type, target: classified.target });}
+    else if (classified.kind === "relation") {relations.push({ type: classified.type, target: classified.target });}
+    else {assigneeLines.push(classified.ref);}
   }
-  return { description: descriptionLines.join("\n"), checklist, relations };
+  return {
+    description: descriptionLines.join("\n"),
+    checklist,
+    relations,
+    // A task takes at most one assignee; several `[@]` lines are flagged
+    // (the promote flow rejects them) rather than silently picking one.
+    assignee: assigneeLines.length > 0 ? assigneeLines[assigneeLines.length - 1] : undefined,
+    assigneeMultiple: assigneeLines.length > 1,
+  };
 }
 
-/** Render description + checklist + relations into plain body lines (fixed order). */
+/** Render description + checklist + relations + assignee into plain body lines (fixed order). */
 function renderBodyLines(body: Omit<TodoCommentPayload, "title">): string[] {
   const lines: string[] = [];
   for (const d of body.description.split("\n")) {
@@ -421,6 +441,9 @@ function renderBodyLines(body: Omit<TodoCommentPayload, "title">): string[] {
   }
   for (const relation of body.relations) {
     lines.push(`[${RELATION_TYPE_TO_MARKER[relation.type]}] ${relation.target}`);
+  }
+  if (body.assignee !== undefined) {
+    lines.push(`[@] ${body.assignee}`);
   }
   return lines;
 }
@@ -884,6 +907,35 @@ export async function removeTodoCommentRelationsFromFile(
   });
 }
 
+/**
+ * Remove the `[@]` assignee line from a promoted TODO comment
+ * after the referenced identity has been deleted.
+ * Promotion writes the assignee in canonical form (`id-... "name@domain"`),
+ * so we match the leading (whitespace-separated) identity-id token against
+ * the deleted identity's id. A name-only line will not match - which is safe,
+ * since those are not reliable identifiers to scrub.
+ * Returns `true` when nothing needed to change,
+ * and `false` only when the file could not be read or written back.
+ */
+export async function removeDanglingAssigneeFromFile(
+  filePath: string,
+  todoId: string,
+  deletedIdentityId: string,
+): Promise<boolean> {
+  return withFileLock(filePath, async () => {
+    const text = await readFileTextLiveOrDisk(filePath);
+    if (!text) {return false;}
+    const current = parseTodoComment(text, todoId);
+    if (!current) {return false;}
+    if (current.assignee === undefined) {return true;}
+    const leadingToken = current.assignee.trim().split(/\s+/)[0];
+    if (leadingToken !== deletedIdentityId) {return true;}
+    const next = rewriteTodoComment(text, todoId, { ...current, assignee: undefined, assigneeMultiple: undefined });
+    if (!next) {return false;}
+    return await writeFileTextLiveOrDisk(filePath, next);
+  });
+}
+
 /** Whether board -> code propagation is enabled (opt-out setting). */
 export function isInCodeEditingEnabled(): boolean {
   try {
@@ -937,4 +989,45 @@ export function resolveRelationTarget(
     }
   }
   return undefined;
+}
+
+/**
+ * Resolve an `[@]` identity reference (from code) to an identity.
+ * Accepted forms:
+ *  - an identity id (`id-...`), optionally followed by a cosmetic `"displayName@domain"`;
+ *  - a `"displayName@domain"` pair (quotes optional), matched case-insensitively.
+ */
+export function resolveIdentityRef(
+  board: LynvoBoard,
+  ref: string,
+): LynvoIdentity | undefined {
+  const text = (ref || "").trim();
+  if (!text) {return undefined;}
+  const identities = board.identities || {};
+  // 1) A leading identity-id token is the reliable link; the quoted name is cosmetic.
+  const firstToken = text.split(/\s+/)[0];
+  if (identities[firstToken]) {
+    return identities[firstToken];
+  }
+  // 2) A `displayName@domain` pair (quoted, or bare when it is the whole reference).
+  const quoted = text.match(/"([^"]+)"/);
+  const pair = (quoted ? quoted[1] : firstToken === text ? text : "").trim();
+  if (!pair || !pair.includes("@")) {return undefined;}
+  const at = pair.lastIndexOf("@");
+  const name = pair.slice(0, at).trim().toLowerCase();
+  const domain = pair.slice(at + 1).trim().toLowerCase();
+  if (!name || !domain) {return undefined;}
+  return Object.values(identities).find(
+    (identity) =>
+      identity.displayName.trim().toLowerCase() === name &&
+      (identity.sourceId || "").trim().toLowerCase() === domain,
+  );
+}
+
+/** The canonical `[@]` reference form for an identity: `id-... "displayName@domain"`. */
+export function formatAssigneeRef(identity: LynvoIdentity): string {
+  if (identity.displayName && identity.sourceId) {
+    return `${identity.id} "${identity.displayName}@${identity.sourceId}"`;
+  }
+  return identity.id;
 }
