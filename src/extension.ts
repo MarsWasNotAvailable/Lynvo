@@ -374,6 +374,10 @@ export function activate(context: vscode.ExtensionContext) {
   // Load the l10n bundle first so every user-facing string resolves to the
   // active VS Code language (falls back to English if the bundle is missing).
   initL10n();
+
+  // Register the GitLab OAuth2 PKCE authentication provider.
+  AuthProvider.registerGitLab(context);
+
   const lynvoMenuProvider = new LynvoMenuProvider();
   const treeDataRegistration = vscode.window.registerTreeDataProvider(
     "lynvo.sidebarMenu",
@@ -556,6 +560,7 @@ export function activate(context: vscode.ExtensionContext) {
       const source = await vscode.window.showQuickPick(
         [
           { id: "github", label: "GitHub" },
+          { id: "gitlab", label: "GitLab" },
           { id: "local", label: t("Local (type a name)") },
         ],
         { title: t("Create Identity"), placeHolder: t("Choose identity source") },
@@ -569,6 +574,15 @@ export function activate(context: vscode.ExtensionContext) {
         case "github": {
           // Use the GitHub auth session to pre-fill name and handle.
           const user = await AuthProvider.getGitHubUser({ createIfNone: true });
+          if (!user) {return;}
+          displayName = user.label;
+          sourceId = user.id;
+          break;
+        }
+
+        case "gitlab": {
+          // Use the GitLab auth session to pre-fill name and handle.
+          const user = await AuthProvider.getGitLabUser({ createIfNone: true });
           if (!user) {return;}
           displayName = user.label;
           sourceId = user.id;

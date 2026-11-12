@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { DataManager } from "./DataManager";
 import { GitService } from "./GitService";
-import { AuthProvider } from "./AuthProvider";
+import { AuthProvider, isRemoteSource } from "./AuthProvider";
 import { getWebviewBundle, t } from "../l10n";
 import {
   applyRelationPlan,
@@ -842,6 +842,21 @@ export class LynvoPanel {
               }
             }
 
+            // If deleting identities from a remote domain, warn and revoke the provider session.
+            if (!keepIdentitiesLocal && affected > 0) {
+              const domainProvider = board?.domains?.[name]?.provider;
+              if (domainProvider && isRemoteSource(domainProvider)) {
+                const providerName = AuthProvider.getProviderDisplayName(domainProvider);
+                const revokeAction = t("Delete and revoke");
+                const choice = await vscode.window.showWarningMessage(
+                  t('This will also revoke your {0} authentication and delete local tokens. Continue?', providerName),
+                  { modal: true },
+                  revokeAction,
+                );
+                if (choice !== revokeAction) {return;} // The user cancelled.
+                await AuthProvider.revokeSession(domainProvider);
+              }
+            }
             await DataManager.removeDomain(name, keepIdentitiesLocal);
             // When identities were deleted (keepIdentitiesLocal=false), clean up their
             // `[@]` assignee lines in any linked tasks that still reference them.
@@ -890,12 +905,18 @@ export class LynvoPanel {
           }
           case "addRemoteDomain": {
             const provider = asString(message.provider) || "github";
-            const user = await AuthProvider.getGitHubUser({ createIfNone: true });
+            let user;
+            if (provider === "gitlab") {
+              user = await AuthProvider.getGitLabUser({ createIfNone: true });
+            } else {
+              user = await AuthProvider.getGitHubUser({ createIfNone: true });
+            }
             if (!user) {
+              const providerName = AuthProvider.getProviderDisplayName(provider);
               webview.postMessage({
                 command: "identityResult",
                 success: false,
-                error: t("GitHub sign-in was cancelled or failed."),
+                error: t("{0} sign-in was cancelled or failed.", providerName),
               });
               return;
             }
@@ -964,6 +985,22 @@ export class LynvoPanel {
             const identityId = asString(message.identityId);
             if (!identityId) {
               return;
+            }
+            // If the identity has a remote source (github/gitlab),
+            // warn the user that the provider's authentication will be revoked.
+            const boardForSource = await DataManager.loadBoard();
+            const identityForSource = boardForSource?.identities?.[identityId];
+            if (identityForSource && isRemoteSource(identityForSource.source)) {
+              const providerName = AuthProvider.getProviderDisplayName(identityForSource.source);
+              const revokeAction = t("Delete and revoke");
+              const choice = await vscode.window.showWarningMessage(
+                t('Delete "{0}"? This will also revoke your {1} authentication and delete local tokens.', identityForSource.displayName, providerName),
+                { modal: true },
+                revokeAction,
+              );
+              if (choice !== revokeAction) {return;} // The user cancelled.
+              // Revoke the provider session (best-effort).
+              await AuthProvider.revokeSession(identityForSource.source);
             }
             // Capture linked tasks assigned to this identity BEFORE deletion,
             // so that we can clean up their in-code `[@]` line afterwards.

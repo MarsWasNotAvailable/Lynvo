@@ -3649,6 +3649,7 @@ export const App: React.FC = () => {
                   aria-label={t("Provider")}
                 >
                   <option value="github">GitHub</option>
+                  <option value="gitlab">GitLab</option>
                 </select>
                 <button type="button" className="icon-btn" style={iconButtonStyle} onClick={submitAddRemoteDomain} title={t("Sign in with GitHub")} aria-label={t("Sign in with GitHub")}><ExternalArrowIcon /></button>
               </div>
