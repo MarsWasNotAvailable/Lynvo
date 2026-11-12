@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { LynvoLog } from "../logging";
 import {
   CodeReference,
   LynvoActivity,
@@ -285,7 +286,7 @@ export class DataManager {
       return JSON.parse(raw) as T;
     } catch (error) {
       await this.backupCorruptJson(uri, fileData).catch((backupError) =>
-        console.error(`Lynvo: failed to backup corrupt json ${uri.path}`, backupError),
+        LynvoLog.error(`Lynvo: failed to backup corrupt json ${uri.path}`, backupError),
       );
       throw error;
     }
@@ -349,7 +350,7 @@ export class DataManager {
           tasks[task.id] = task;
         }
       } catch (error) {
-        console.error(`Lynvo: invalid task file ${name}`, error);
+        LynvoLog.error(`Lynvo: invalid task file ${name}`, error);
       }
     }
 
@@ -376,7 +377,7 @@ export class DataManager {
           activity[item.id] = item;
         }
       } catch (error) {
-        console.error(`Lynvo: invalid activity file ${name}`, error);
+        LynvoLog.error(`Lynvo: invalid activity file ${name}`, error);
       }
     }
 
@@ -394,7 +395,7 @@ export class DataManager {
     try {
       return await this.readJson<T>(uri);
     } catch (error) {
-      console.error(`Lynvo: invalid json ${uri.path}`, error);
+      LynvoLog.error(`Lynvo: invalid json ${uri.path}`, error);
       return fallback;
     }
   }
@@ -454,7 +455,7 @@ export class DataManager {
           identities = parsed.identities;
           domainsOnFile = parsed.domains;
         } catch (error) {
-          console.error("Lynvo: invalid identities file", error);
+          LynvoLog.error("Lynvo: invalid identities file", error);
         }
       }
 
@@ -472,7 +473,7 @@ export class DataManager {
         conflicts,
       });
     } catch (error) {
-      console.error("Lynvo: error loading modular board", error);
+      LynvoLog.error("Lynvo: error loading modular board", error);
       vscode.window.showWarningMessage(
         t("Lynvo could not read the modular persistence. Check .vscode/lynvo."),
       );
@@ -488,7 +489,7 @@ export class DataManager {
       const parsed = await this.readJson<LynvoBoard>(legacyUri);
       return this.ensureBoardIntegrity(parsed);
     } catch (error) {
-      console.error("Lynvo: error loading legacy board", error);
+      LynvoLog.error("Lynvo: error loading legacy board", error);
       vscode.window.showWarningMessage(
         t("Lynvo could not read .vscode/lynvo.json. The file might be corrupted."),
       );

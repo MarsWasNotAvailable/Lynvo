@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { LynvoBoard, LynvoIdentity, LynvoTaskRelationType } from "../types";
+import { LynvoLog } from "../logging";
 
 /**
  * Keywords (case-sensitive) that mark a source line as promotable into a Lynvo task.
@@ -745,7 +746,7 @@ export async function saveDocument(
     const saved = await withTimeout(doc.save(), timeoutMs, `save ${doc.uri.toString()}`);
     return saved === true;
   } catch (error) {
-    console.error("Lynvo: save failed", error);
+    LynvoLog.error("Lynvo: save failed", error);
     return false;
   }
 }

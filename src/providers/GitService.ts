@@ -4,6 +4,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { DataManager } from "./DataManager";
+import { LynvoLog } from "../logging";
 import { getSchemaVersion } from "../schema";
 import { t } from "../l10n";
 import { parseIdentitiesFile, serializeIdentitiesFile } from "../identitiesFile";
@@ -125,7 +126,7 @@ export class GitService {
       return JSON.parse(raw) as T;
     } catch (error) {
       await this.backupCorruptJson(filePath, raw).catch((backupError) =>
-        console.error(`Lynvo: failed to backup corrupt remote json ${filePath}`, backupError),
+        LynvoLog.error(`Lynvo: failed to backup corrupt remote json ${filePath}`, backupError),
       );
       throw error;
     }
@@ -232,7 +233,7 @@ export class GitService {
           const task = await this.readJson<LynvoTask>(path.join(tasksPath, entry.name));
           if (task.id) {tasks[task.id] = task;}
         } catch (error) {
-          console.error(`Lynvo: invalid remote task file ${entry.name}`, error);
+          LynvoLog.error(`Lynvo: invalid remote task file ${entry.name}`, error);
         }
       }
     }
@@ -247,7 +248,7 @@ export class GitService {
           );
           if (item.id) {activity[item.id] = item;}
         } catch (error) {
-          console.error(`Lynvo: invalid remote activity file ${entry.name}`, error);
+          LynvoLog.error(`Lynvo: invalid remote activity file ${entry.name}`, error);
         }
       }
     }
@@ -261,7 +262,7 @@ export class GitService {
         identities = parsed.identities;
         domainsOnFile = parsed.domains;
       } catch (error) {
-        console.error("Lynvo: invalid remote identities file", error);
+        LynvoLog.error("Lynvo: invalid remote identities file", error);
       }
     }
 
@@ -694,7 +695,7 @@ export class GitService {
         hasConflicts,
       };
     } catch (error) {
-      console.error("Lynvo Git Error:", error);
+      LynvoLog.error("Lynvo Git Error:", error);
       const detail = error instanceof Error ? error.message : String(error);
       await DataManager.updateSyncMetadata({
         status: stage === "fetch" || stage === "push" ? "offline" : "failed",
@@ -743,7 +744,7 @@ export class GitService {
       this.syncBoard().then((result) => {
         onComplete?.(result);
         if (!result.success) {
-          console.warn(`Lynvo background sync skipped: ${result.message}`);
+          LynvoLog.warn(`Lynvo background sync skipped: ${result.message}`);
         }
       });
     }, delayMs);

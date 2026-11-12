@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as http from "http";
 import * as crypto from "crypto";
+import { LynvoLog } from "../logging";
 
 /**
  * GitLab OAuth2 PKCE Authentication Provider.
@@ -165,7 +166,7 @@ function startCallbackServer(timeoutMs: number): {
     const url = new URL(req.url || "/", "http://127.0.0.1");
     const code = url.searchParams.get("code");
     const error = url.searchParams.get("error");
-    console.info(`[Lynvo GitLab] Callback received: ${code ? "authorization code" : `error: ${error || "unknown"}`}`);
+    LynvoLog.info(`[GitLab] Callback received: ${code ? "authorization code" : `error: ${error || "unknown"}`}`);
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(code ? successPageHtml() : errorPageHtml(error));
     server.close();
@@ -180,7 +181,7 @@ function startCallbackServer(timeoutMs: number): {
     if (settled) {return;}
     settled = true;
     server.close();
-    console.error("[Lynvo GitLab] Sign-in timed out: no redirect received from the browser.");
+    LynvoLog.error("[GitLab] Sign-in timed out: no redirect received from the browser.");
     rejectResult(new Error("GitLab sign-in timed out (no redirect received)."));
   }, timeoutMs);
 
@@ -254,10 +255,10 @@ async function revokeGitLabToken(accessToken: string): Promise<void> {
       }).toString(),
       signal: AbortSignal.timeout(HTTPS_TIMEOUT_MS),
     });
-    console.info("[Lynvo GitLab] Access token revoked at the provider.");
+    LynvoLog.info("[GitLab] Access token revoked at the provider.");
   } catch (error) {
     // Best-effort: network failures or already-revoked tokens are non-fatal.
-    console.error(`[Lynvo GitLab] Token revocation failed (non-fatal): ${error}`);
+    LynvoLog.error(`[GitLab] Token revocation failed (non-fatal): ${error}`);
   }
 }
 
@@ -340,7 +341,7 @@ export class GitLabAuthProvider implements vscode.AuthenticationProvider {
     scopes: readonly string[],
     _options: vscode.AuthenticationProviderSessionOptions,
   ): Promise<vscode.AuthenticationSession> {
-    console.info(`[Lynvo GitLab] Starting sign-in (scopes: ${scopes.join(", ") || "none"}).`);
+    LynvoLog.info(`[GitLab] Starting sign-in (scopes: ${scopes.join(", ") || "none"}).`);
 
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = deriveCodeChallenge(codeVerifier);
@@ -349,7 +350,7 @@ export class GitLabAuthProvider implements vscode.AuthenticationProvider {
     const { port: portPromise, result: resultPromise } = startCallbackServer(SIGN_IN_TIMEOUT_MS);
     const port = await portPromise;
     const redirectUri = `http://127.0.0.1:${port}/callback`;
-    console.info(`[Lynvo GitLab] Callback server listening on ${redirectUri}.`);
+    LynvoLog.info(`[GitLab] Callback server listening on ${redirectUri}.`);
 
     // 2. Open the browser to GitLab's authorize page.
     const authorizeUrl = new URL(GITLAB_AUTHORIZE_URL);
@@ -361,7 +362,7 @@ export class GitLabAuthProvider implements vscode.AuthenticationProvider {
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
     authorizeUrl.searchParams.set("state", crypto.randomBytes(16).toString("hex"));
 
-    console.info("[Lynvo GitLab] Opening the browser to the GitLab authorization page.");
+    LynvoLog.info("[GitLab] Opening the browser to the GitLab authorization page.");
     await vscode.env.openExternal(vscode.Uri.parse(authorizeUrl.toString()));
 
     // 3. Wait for the redirect (blocks until the user completes sign-in or timeout).
@@ -372,15 +373,15 @@ export class GitLabAuthProvider implements vscode.AuthenticationProvider {
     if (!code) {
       throw new Error("GitLab sign-in failed: no authorization code received.");
     }
-    console.info("[Lynvo GitLab] Authorization code received; exchanging for an access token.");
+    LynvoLog.info("[GitLab] Authorization code received; exchanging for an access token.");
 
     // 4. Exchange the code for a token.
     const tokenResponse = await exchangeCodeForToken(code, codeVerifier, redirectUri);
-    console.info(`[Lynvo GitLab] Access token obtained (type: ${tokenResponse.token_type}).`);
+    LynvoLog.info(`[GitLab] Access token obtained (type: ${tokenResponse.token_type}).`);
 
     // 5. Fetch the user profile.
     const user = await fetchGitLabUser(tokenResponse.access_token);
-    console.info(`[Lynvo GitLab] Fetched GitLab user: ${user.username} (id: ${user.id}).`);
+    LynvoLog.info(`[GitLab] Fetched GitLab user: ${user.username} (id: ${user.id}).`);
 
     // 6. Store the session.
     const sessionId = `gitlab-${user.id}-${Date.now().toString(36)}`;
@@ -398,7 +399,7 @@ export class GitLabAuthProvider implements vscode.AuthenticationProvider {
       removed: undefined,
       changed: undefined,
     });
-    console.info(`[Lynvo GitLab] Sign-in complete; session ${sessionId} stored.`);
+    LynvoLog.info(`[GitLab] Sign-in complete; session ${sessionId} stored.`);
 
     return toVsCodeSession(session);
   }

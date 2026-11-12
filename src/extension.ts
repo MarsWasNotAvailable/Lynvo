@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { LynvoLog } from "./logging";
 import { AuthProvider } from "./providers/AuthProvider";
 import { LynvoPanel } from "./providers/LynvoPanel";
 import { DataManager } from "./providers/DataManager";
@@ -444,35 +445,35 @@ export function activate(context: vscode.ExtensionContext) {
   void (async () => {
     const persistedSchema = await DataManager.readPersistedVersion().catch(() => null);
     await DataManager.promptAndMigrateIfNeeded(persistedSchema).catch((err) =>
-      console.error("Lynvo Migration Prompt Error:", err),
+      LynvoLog.error("Lynvo Migration Prompt Error:", err),
     );
     await DataManager.checkSchemaCompatibility().catch((err) =>
-      console.error("Lynvo Schema Check Error:", err),
+      LynvoLog.error("Lynvo Schema Check Error:", err),
     );
     await DataManager.initializeBoard().catch((err) =>
-      console.error("Lynvo Init Error:", err),
+      LynvoLog.error("Lynvo Init Error:", err),
     );
     await DataManager.updateUserPresence().catch((err) =>
-      console.error("Lynvo Presence Error:", err),
+      LynvoLog.error("Lynvo Presence Error:", err),
     );
   })();
 
   SkillInstaller.installAll(context.extensionUri, context, { silent: true }).then(
     (result) => {
       if (result.installed.length > 0) {
-        console.log(`Lynvo: skills installed → ${result.installed.join(", ")}`);
+        LynvoLog.log(`Lynvo: skills installed → ${result.installed.join(", ")}`);
       }
       if (result.errors.length > 0) {
-        console.warn(`Lynvo: skill install errors → ${result.errors.join(", ")}`);
+        LynvoLog.warn(`Lynvo: skill install errors → ${result.errors.join(", ")}`);
       }
     },
-  ).catch((err) => console.error("Lynvo Skill Install Error:", err));
+  ).catch((err) => LynvoLog.error("Lynvo Skill Install Error:", err));
 
   context.subscriptions.push(treeDataRegistration);
   context.subscriptions.push(boardWatcher);
   const autoSyncInterval = setInterval(async () => {
     await DataManager.updateUserPresence().catch((err) =>
-      console.error("Lynvo Presence Error:", err),
+      LynvoLog.error("Lynvo Presence Error:", err),
     );
     // Periodically check for remote updates to pull (detection only, no push).
     const remotePending = await GitService.checkForRemoteChanges();
@@ -504,7 +505,7 @@ export function activate(context: vscode.ExtensionContext) {
         );
       }
     } else {
-      console.warn(`Lynvo periodic sync skipped: ${result.message}`);
+      LynvoLog.warn(`Lynvo periodic sync skipped: ${result.message}`);
     }
   }, 120000);
 

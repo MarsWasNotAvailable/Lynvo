@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { t } from "../l10n";
+import { LynvoLog } from "../logging";
 import { GitLabAuthProvider, registerGitLabProvider } from "./GitLabAuthProvider";
 
 /**
@@ -60,7 +61,7 @@ export class AuthProvider {
         };
       }
     } catch (error) {
-      console.error("Lynvo: Error authenticating with GitHub", error);
+      LynvoLog.error("Lynvo: Error authenticating with GitHub", error);
       if (createIfNone) {
         vscode.window.showErrorMessage(
           t("Lynvo: You must sign in to {0} to continue.", "GitHub"),
@@ -89,7 +90,7 @@ export class AuthProvider {
         };
       }
     } catch (error) {
-      console.error("Lynvo: Error authenticating with GitLab", error);
+      LynvoLog.error("Lynvo: Error authenticating with GitLab", error);
       if (createIfNone) {
         vscode.window.showErrorMessage(
           t("Lynvo: You must sign in to {0} to continue.", "GitLab"),
