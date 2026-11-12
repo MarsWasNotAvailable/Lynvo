@@ -1823,6 +1823,9 @@ export class DataManager {
       delete board.domains[dom];
 
       const instigator = await this.getSigningIdentity(board);
+      // Tombstone so that the sync merge does not resurrect the domain
+      // from the shadow branch (identities/domains merge as a union).
+      this.addTombstone(board, "domain", dom, instigator);
       this.addActivity(
           board, "domain_deleted",
           `${dom}`,
@@ -1841,6 +1844,9 @@ export class DataManager {
       } else {
         // Delete the domain's identities and unassign any tasks that pointed at them.
         affected.forEach((identity) => {
+          // Tombstone each identity so that the sync merge does not
+          // resurrect it from the shadow branch.
+          this.addTombstone(board, "identity", identity.id, instigator);
           this.addActivity(
             board, "identity_deleted",
             `${identity.displayName}@${identity.sourceId || "local"}`,
@@ -1946,6 +1952,9 @@ export class DataManager {
       // identity still signs the activity with its own name.
       const instigator = await this.getSigningIdentity(board);
       const removed = board.identities[identityId];
+      // Tombstone so that the sync merge does not resurrect the identity
+      // from the shadow branch (identities merge as a union).
+      this.addTombstone(board, "identity", identityId, instigator);
       delete board.identities[identityId];
       this.addActivity(
         board, "identity_deleted",

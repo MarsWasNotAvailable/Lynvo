@@ -32,6 +32,12 @@ import * as crypto from "crypto";
 //  - Scopes           : read_user
 // Then set the issued Application ID below (or expose it as an extension setting).
 //
+// GITLAB NOTE:
+// The `Clients` counter is probably not a real-time counter, so do not expect
+// the value update in real time when revoking a token.
+// Secondly, it seems to be a "how much time it was used" counter, and not
+// a "how much are are active now" counter.
+// 
 // SECURITY NOTE: The `client_id` is a PUBLIC identifier (like an app's username),
 // NOT a secret. It is safe to commit to source control. The actual security
 // comes from: (1) PKCE (prevents code interception), (2) the user's explicit
@@ -54,6 +60,7 @@ const GITLAB_REVOKE_URL = `${GITLAB_BASE_URL}/oauth/revoke`;
 const PROVIDER_ID = "lynvo-gitlab";
 const PROVIDER_LABEL = "GitLab";
 const SIGN_IN_TIMEOUT_MS = 120_000; // 2 minutes for the user to complete sign-in
+const HTTPS_TIMEOUT_MS = 30_000; // outbound API calls must not hang the sign-in flow
 
 // ─── PKCE helpers ─────────────────────────────────────────────────────────────
 
@@ -209,6 +216,7 @@ async function exchangeCodeForToken(
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
+    signal: AbortSignal.timeout(HTTPS_TIMEOUT_MS),
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
@@ -226,6 +234,7 @@ interface GitLabUser {
 async function fetchGitLabUser(accessToken: string): Promise<GitLabUser> {
   const response = await fetch(GITLAB_USER_URL, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(HTTPS_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(`Failed to fetch GitLab user (${response.status}).`);
@@ -243,6 +252,7 @@ async function revokeGitLabToken(accessToken: string): Promise<void> {
         token: accessToken,
         client_id: GITLAB_CLIENT_ID,
       }).toString(),
+      signal: AbortSignal.timeout(HTTPS_TIMEOUT_MS),
     });
     console.info("[Lynvo GitLab] Access token revoked at the provider.");
   } catch (error) {

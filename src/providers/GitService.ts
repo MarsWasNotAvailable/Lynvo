@@ -433,6 +433,8 @@ export class GitService {
     Object.values(mergedTombstones).forEach((tombstone) => {
       if (tombstone.entityType === "column") {delete mergedColumns[tombstone.entityId];}
       if (tombstone.entityType === "label") {delete mergedLabels[tombstone.entityId];}
+      if (tombstone.entityType === "identity") {delete mergedIdentities[tombstone.entityId];}
+      if (tombstone.entityType === "domain") {delete mergedDomains[tombstone.entityId];}
     });
 
     return {

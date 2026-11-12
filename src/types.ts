@@ -159,7 +159,7 @@ export interface LynvoSyncMetadata {
 
 export interface LynvoTombstone {
   id: string;
-  entityType: "task" | "column" | "label";
+  entityType: "task" | "column" | "label" | "identity" | "domain";
   entityId: string;
   deletedAt: number;
   /** Identity ID (stored in identities.json) that deleted the entity; undefined = anonymous. */

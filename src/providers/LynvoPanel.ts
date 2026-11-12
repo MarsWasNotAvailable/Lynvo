@@ -986,25 +986,24 @@ export class LynvoPanel {
             if (!identityId) {
               return;
             }
-            // If the identity has a remote source (github/gitlab),
-            // warn the user that the provider's authentication will be revoked.
-            const boardForSource = await DataManager.loadBoard();
-            const identityForSource = boardForSource?.identities?.[identityId];
-            if (identityForSource && isRemoteSource(identityForSource.source)) {
-              const providerName = AuthProvider.getProviderDisplayName(identityForSource.source);
-              const revokeAction = t("Delete and revoke");
-              const choice = await vscode.window.showWarningMessage(
-                t('Delete "{0}"? This will also revoke your {1} authentication and delete local tokens.', identityForSource.displayName, providerName),
-                { modal: true },
-                revokeAction,
-              );
-              if (choice !== revokeAction) {return;} // The user cancelled.
-              // Revoke the provider session (best-effort).
-              await AuthProvider.revokeSession(identityForSource.source);
-            }
+            // Deleting an identity only removes it (and unassigns its tasks):
+            // it does NOT revoke the provider's authentication or the domain.
+            // Revocation is a separate, deliberate action (domain deletion,
+            // or the provider's own sign-out).
             // Capture linked tasks assigned to this identity BEFORE deletion,
             // so that we can clean up their in-code `[@]` line afterwards.
             const boardBefore = await DataManager.loadBoard();
+            const identityTarget = boardBefore?.identities?.[identityId];
+            if (identityTarget) {
+              const deleteMessage = t('Delete "{0}"?', identityTarget.displayName);
+              const deleteAction = t("Delete");
+              const choice = await vscode.window.showWarningMessage(
+                deleteMessage,
+                { modal: true },
+                deleteAction,
+              );
+              if (choice !== deleteAction) {return;} // The user cancelled.
+            }
             const linkedAssignees = Object.values(boardBefore?.tasks || {})
               .filter((task) =>
                 task.assigneeId === identityId &&

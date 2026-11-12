@@ -314,7 +314,7 @@
   "{0} sign-in was cancelled or failed.": "L'accesso a {0} è stato annullato o non riuscito.",
   "Lynvo: You must sign in to {0} to continue.": "Lynvo: Devi accedere a {0} per continuare.",
   "Delete and revoke": "Elimina e revoca",
-  "Delete \"{0}\"? This will also revoke your {1} authentication and delete local tokens.": "Eliminare \"{0}\"? Verrà anche revocata la tua autenticazione {1} e i token locali verranno eliminati.",
+  "Delete \"{0}\"?": "Eliminare \"{0}\"?",
   "This will also revoke your {0} authentication and delete local tokens. Continue?": "Verrà anche revocata la tua autenticazione {0} e i token locali verranno eliminati. Continuare?",
   "To fully revoke GitHub access, use 'GitHub: Sign Out' from the Command Palette.": "Per revocare completamente l'accesso a GitHub, usa 'GitHub: Disconnetti' dalla palette dei comandi.",
   "Domain": "Dominio",

@@ -108,6 +108,12 @@
         "title": "%command.setLanguage%"
       }
     ],
+    "authentication": [
+      {
+        "id": "lynvo-gitlab",
+        "label": "GitLab"
+      }
+    ],
     "menus": {
       "editor/context": [
         {
