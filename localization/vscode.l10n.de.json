@@ -69,6 +69,7 @@
   "Sync pending.": "Synchronisierung ausstehend.",
   "Workspace not found.": "Arbeitsbereich nicht gefunden.",
   "No local board to sync.": "Kein lokales Board zum Synchronisieren.",
+  "Lynvo skipped this sync round: the board changed while merging. It will retry.": "Lynvo hat diese Synchronisation übersprungen: Das Board hat sich während des Merges geändert. Es wird erneut versucht.",
   "Lynvo could save the changes locally, but not push to the remote lynvo-sync branch. {0}": "Lynvo konnte die Änderungen lokal speichern, aber nicht auf den Remote-Branch lynvo-sync pushen. {0}",
   "Lynvo synced the board on the technical branch lynvo-sync.": "Lynvo hat das Board auf dem technischen Branch lynvo-sync synchronisiert.",
   "Lynvo could not synchronize ({0}). {1}": "Lynvo konnte nicht synchronisieren ({0}). {1}",

@@ -69,6 +69,7 @@
   "Sync pending.": "Sincronizzazione in sospeso.",
   "Workspace not found.": "Spazio di lavoro non trovato.",
   "No local board to sync.": "Nessun tabellone locale da sincronizzare.",
+  "Lynvo skipped this sync round: the board changed while merging. It will retry.": "Lynvo ha saltato questa sincronizzazione: il tabellone è cambiato durante la fusione. Verrà riprovato.",
   "Lynvo could save the changes locally, but not push to the remote lynvo-sync branch. {0}": "Lynvo ha potuto salvare le modifiche localmente, ma non ha potuto fare push sul branch remoto lynvo-sync. {0}",
   "Lynvo synced the board on the technical branch lynvo-sync.": "Lynvo ha sincronizzato il tabellone sul branch tecnico lynvo-sync.",
   "Lynvo could not synchronize ({0}). {1}": "Lynvo non è riuscito a sincronizzare ({0}). {1}",

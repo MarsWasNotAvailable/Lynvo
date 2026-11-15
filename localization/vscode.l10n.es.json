@@ -69,6 +69,7 @@
   "Sync pending.": "Sincronización pendiente.",
   "Workspace not found.": "Área de trabajo no encontrada.",
   "No local board to sync.": "No hay tablero local para sincronizar.",
+  "Lynvo skipped this sync round: the board changed while merging. It will retry.": "Lynvo omitió esta sincronización: el tablero cambió durante la fusión. Se reintentará.",
   "Lynvo could save the changes locally, but not push to the remote lynvo-sync branch. {0}": "Lynvo pudo guardar los cambios localmente, pero no pudo hacer push a la rama remota lynvo-sync. {0}",
   "Lynvo synced the board on the technical branch lynvo-sync.": "Lynvo sincronizó el tablero en la rama técnica lynvo-sync.",
   "Lynvo could not synchronize ({0}). {1}": "Lynvo no pudo sincronizar ({0}). {1}",

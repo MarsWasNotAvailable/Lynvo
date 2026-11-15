@@ -55,11 +55,37 @@ const generateRelationActivityType = (
   }
 };
 
+/**
+ * Thrown when a board snapshot is saved after a newer snapshot has already
+ * been committed (optimistic concurrency): the older snapshot is refused
+ * so that it cannot overwrite the newer state.
+ */
+export class StaleBoardError extends Error {
+  constructor() {
+    super(
+      "Lynvo: the board changed after it was loaded; the save was refused to protect the newer changes.",
+    );
+    this.name = "StaleBoardError";
+  }
+}
+
 export class DataManager {
   private static readonly LEGACY_FILENAME = "lynvo.json";
   private static readonly FOLDER = ".vscode";
   private static readonly MODULAR_FOLDER = "lynvo";
   private static writeQueue: Promise<void> = Promise.resolve();
+
+  /**
+   * Monotonic count of board snapshots committed to disk.
+   * Bumped by every successful `saveBoardUnsafe`; compared by
+   * `saveBoard(board, expectedGeneration)` to refuse stale snapshots.
+   */
+  private static boardGeneration = 0;
+
+  /** Snapshot generation of the board at the last successful save. */
+  public static getBoardGeneration(): number {
+    return this.boardGeneration;
+  }
 
   // In-memory guard so the schema-mismatch warning shows at most once per session.
   private static schemaWarningShown = false;
@@ -497,6 +523,17 @@ export class DataManager {
     }
   }
 
+  /**
+   * Lock-free board write: it does NOT acquire the write queue.
+   * 
+   * Check {@link loadBoardUnsafe} for why it's unsafe, but in short :
+   * only safe when the caller already holds the lock (queued tasks).
+   * 
+   * External callers must use `saveBoard(board, expectedGeneration?)`
+   * or `mutateBoard(mutator)`.
+   * 
+   * Bumps {@link boardGeneration} once the whole snapshot is committed.
+   */
   private static async saveBoardUnsafe(board: LynvoBoard): Promise<void> {
     const root = this.getModularRootUri();
     const boardUri = this.joinModularPath("board.json");
@@ -595,6 +632,10 @@ export class DataManager {
         await vscode.workspace.fs.delete(vscode.Uri.joinPath(activityUri, name));
       }
     }
+
+    // All files of the snapshot are committed: bump the board generation so
+    // that stale snapshots (loaded before this commit) are refused later.
+    this.boardGeneration += 1;
   }
 
   private static addActivity(
@@ -665,6 +706,19 @@ export class DataManager {
     return run;
   }
 
+  /**
+   * Lock-free board read: it does NOT acquire the write queue.
+   *
+   * "Unsafe" means a concurrent save can interleave mid-read: since a board
+   * spans ~15 files written sequentially by `saveBoardUnsafe`, the result
+   * may mix files from two different snapshots (a "torn read").
+   *
+   * Call this ONLY from within an already-queued task (`mutateBoard`,
+   * `saveBoard`, `updateSyncMetadata`, `updateUserPresence`, ...), which
+   * holds the lock by definition. Public/external callers must use
+   * `loadBoard()`, which serializes the read with all writes.
+   * Calling `loadBoard()` from inside a queued task would deadlock on the queue.
+   */
   private static async loadBoardUnsafe(): Promise<LynvoBoard | null> {
     const modular = await this.loadModularBoard();
     if (modular) {return modular;}
@@ -910,14 +964,46 @@ export class DataManager {
     await this.saveBoard(board || this.getDefaultBoard());
   }
 
+  /**
+   * Load the board snapshot, serialized with all writes via the write queue.
+   * The read waits for any in-flight save to fully commit, so it can never
+   * observe a half-written board (torn read). This is the safe counterpart
+   * of the internal `loadBoardUnsafe` primitive, which is reserved for
+   * callers that already hold the queue lock.
+   */
   public static async loadBoard(): Promise<LynvoBoard | null> {
-    return this.loadBoardUnsafe();
-  }
-
-  public static async saveBoard(board: LynvoBoard): Promise<void> {
     const run = this.writeQueue
       .catch(() => undefined)
-      .then(() => this.saveBoardUnsafe(board));
+      .then(() => this.loadBoardUnsafe());
+    this.writeQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /**
+   * Save a board snapshot taken outside of `mutateBoard`.
+   * Pass the `expectedGeneration` (captured via {@link getBoardGeneration}
+   * right after loading the board) to enable optimistic concurrency: if any
+   * newer snapshot was committed in the meantime, the save is refused with a
+   * {@link StaleBoardError} instead of overwriting the newer state.
+   */
+  public static async saveBoard(
+    board: LynvoBoard,
+    expectedGeneration?: number,
+  ): Promise<void> {
+    const run = this.writeQueue
+      .catch(() => undefined)
+      .then(async () => {
+        if (
+          expectedGeneration !== undefined &&
+          expectedGeneration !== this.boardGeneration
+        ) {
+          throw new StaleBoardError();
+        }
+        await this.saveBoardUnsafe(board);
+      });
     this.writeQueue = run.then(
       () => undefined,
       () => undefined,

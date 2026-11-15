@@ -3,7 +3,7 @@ import * as cp from "child_process";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
-import { DataManager } from "./DataManager";
+import { DataManager, StaleBoardError } from "./DataManager";
 import { LynvoLog } from "../logging";
 import { getSchemaVersion } from "../schema";
 import { t } from "../l10n";
@@ -579,6 +579,10 @@ export class GitService {
           hasConflicts: false,
         };
       }
+      // Snapshot generation captured right after the load: the merge save
+      // below is refused (StaleBoardError) if a newer board state is
+      // committed while we fetch/merge, protecting it from being overwritten.
+      const boardGeneration = DataManager.getBoardGeneration();
       const previousRemoteCommit = localBoard.sync?.lastRemoteCommit || null;
       let fetchedRemoteCommit: string | null = null;
 
@@ -622,7 +626,26 @@ export class GitService {
         ? this.mergeBoards(localBoard, remoteBoard)
         : localBoard;
 
-      await DataManager.saveBoard(mergedBoard);
+      try {
+        await DataManager.saveBoard(mergedBoard, boardGeneration);
+      } catch (error) {
+        if (error instanceof StaleBoardError) {
+          // The board changed (user edit, presence ping, ...) while we were
+          // fetching/merging. Keep the newer local state; skip this round and
+          // re-run the sync so the merge is computed against the fresh state.
+          LynvoLog.warn(
+            "Lynvo sync merge skipped: the board changed while merging; the newer local state was kept.",
+          );
+          this.scheduleBoardSync(10000);
+          return {
+            success: false,
+            message: t("Lynvo skipped this sync round: the board changed while merging. It will retry."),
+            remoteChanged: false,
+            hasConflicts: false,
+          };
+        }
+        throw error;
+      }
       await this.writeBoardToFolder(shadowLynvoPath, mergedBoard);
 
       stage = "commit";
