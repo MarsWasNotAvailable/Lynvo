@@ -164,6 +164,16 @@
           "default": true,
           "description": "%configuration.inCodeEditing.description%"
         },
+        "lynvo.completionColumns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "Done"
+          ],
+          "description": "%configuration.completionColumns.description%"
+        },
         "lynvo.activityLog": {
           "type": "object",
           "default": {

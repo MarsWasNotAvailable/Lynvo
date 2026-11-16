@@ -372,7 +372,7 @@ const clampMapZoom = (value: number): number =>
 type CodeLinkState = "synced" | "diverged" | "broken";
 
 type WebviewInboundMessage =
-  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; activeIdentityId?: string; bundle?: l10nJsonFormat }
+  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; activeIdentityId?: string; completionColumns?: string[]; bundle?: l10nJsonFormat }
   | { command: "setCodeLinkStates"; states: Record<string, CodeLinkState> }
   | { command: "setRemotePending"; pending: boolean }
   | { command: "switchView"; view: LynvoView }
@@ -403,6 +403,9 @@ const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
       // Preserve the active-identity pointer so that a loadData round-trip (e.g. after setCurrentIdentity)
       // confirms the radio value instead of reverting it to "unset".
       activeIdentityId: typeof value.activeIdentityId === "string" ? value.activeIdentityId : undefined,
+      completionColumns: Array.isArray(value.completionColumns)
+        ? (value.completionColumns as unknown[]).filter((entry): entry is string => typeof entry === "string")
+        : undefined,
       bundle: isRecord(value.bundle) ? (value.bundle as l10nJsonFormat) : undefined,
     };
   }
@@ -1192,6 +1195,9 @@ export const App: React.FC = () => {
   const [tableMode, setTableMode] = useState<TableMode>("rows");
   // Identity management (Manage Identities panel).
   const [activeIdentityId, setActiveIdentityId] = useState<string | undefined>(undefined);
+  // Column-name fragments (lynvo.completionColumns setting) that offer the
+  // "remove linked TODO comments" nudge, and are excluded from label usage counts.
+  const [completionColumns, setCompletionColumns] = useState<string[]>([]);
   const [newIdentityName, setNewIdentityName] = useState("");
   const [newIdentityDomain, setNewIdentityDomain] = useState("local");
   // Whether the newly-created identity should become the active one right away.
@@ -1354,6 +1360,9 @@ export const App: React.FC = () => {
         setRemotePending(Boolean(message.remotePending));
         setCodeLinkStates(message.codeLinkStates || {});
         setActiveIdentityId(message.activeIdentityId);
+        if (message.completionColumns) {
+          setCompletionColumns(message.completionColumns);
+        }
         // A (re)initialized webview applies the host's active-language bundle
         // before its first render, so that it never shows a stale seed language.
         if (message.bundle) {
@@ -1479,17 +1488,32 @@ export const App: React.FC = () => {
 
   const tasks = useMemo(() => Object.values(boardData?.tasks || {}), [boardData]);
 
+  // Whether a column title matches the completionColumns setting (case-insensitive "includes");
+  // those columns offer the "remove linked TODO comments" nudge, and their tasks are
+  // excluded from the labels panel usage count.
+  const isCompletionColumn = (title: string): boolean => {
+    const lower = title.toLowerCase();
+    return completionColumns.some((term) => {
+      const needle = term.toLowerCase();
+      return needle.length > 0 && lower.includes(needle);
+    });
+  };
+
   // How many tasks reference each label (by id);
   // powers the labels panel usage count, and the "sort by usage" option.
   const labelUsage = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const task of Object.values(boardData?.tasks || {})) {
+      const column = boardData?.columns?.[task.status];
+      if (column && isCompletionColumn(column.title)) {
+        continue;
+      }
       for (const id of task.labelIds || []) {
         counts[id] = (counts[id] || 0) + 1;
       }
     }
     return counts;
-  }, [boardData]);
+  }, [boardData, completionColumns]);
 
   // How many identities carry each label as a skill (by label id);
   // the reserved All-Trade token is excluded (it is not a label).
@@ -2900,6 +2924,10 @@ export const App: React.FC = () => {
           {t("Label names must be a single word or a compact token (e.g. UI, R&D, CI-CD). Spaces and the # symbol are not allowed.")}
         </div>
 
+        <div style={{ fontSize: "12px", color: "var(--vscode-descriptionForeground)", marginBottom: "12px" }}>
+          {t("Only labels currently in use are counted. See Completion Columns setting.")}
+        </div>
+
         {labelError && (
           <div style={{ marginBottom: "12px", fontSize: "12px", color: "var(--vscode-errorForeground)" }}>
             {labelError}
@@ -4104,6 +4132,11 @@ export const App: React.FC = () => {
           <p style={{ margin: "4px 0 14px", fontSize: "12px", color: "var(--vscode-descriptionForeground)" }}>
             {t("How labelized tasks compare with labelized identities (skills).")}
           </p>
+          <p style={{ margin: "4px 0 14px", fontSize: "12px", color: "var(--vscode-descriptionForeground)" }}>
+            { `*${t("All columns")}`
+             + `: ${t("Only labels currently in use are counted. See Completion Columns setting.")}`
+            }
+          </p>
           <div style={{ marginBottom: "12px" }}>
             <div style={{ fontSize: "12px", marginBottom: "4px", fontWeight: 700 }}>{t("Tasks by label")}</div>
             {renderWorkforceTube(taskSegments, t("No labelized tasks."))}
@@ -4872,8 +4905,6 @@ export const App: React.FC = () => {
         <div className="lynvo-board">
           {sortedColumns.map((col) => {
             const columnTasks = getTasksByStatusFiltered(col.id);
-            const isLastColumn =
-              sortedColumns[sortedColumns.length - 1]?.id === col.id;
             const lingeringRefs = tasks.filter(
               (t) => t.status === col.id && Boolean(t.codeReference?.todoId),
             ).length;
@@ -4929,7 +4960,7 @@ export const App: React.FC = () => {
                   </div>
                 )}
 
-                {isLastColumn && lingeringRefs > 0 && (
+                {isCompletionColumn(col.title) && lingeringRefs > 0 && (
                   <div
                     style={{
                       marginBottom: "12px",

@@ -552,6 +552,25 @@ export class LynvoPanel {
     }
   }
 
+  /**
+   * Column-name fragments (lynvo.completionColumns setting) that offer the
+   * "remove linked TODO comments" nudge. An explicit empty list is honored
+   * as "no column"; a missing/invalid value falls back to none as we cannot
+   * guess what the end-user wants as completion column name.
+   */
+  private static getCompletionColumns(): string[] {
+    try {
+      const raw = vscode.workspace.getConfiguration("lynvo").get<unknown>("completionColumns");
+      if (!Array.isArray(raw)) {return [];}
+      return raw
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
   public static async refreshData() {
     if (LynvoPanel.currentPanel) {
       const board = await DataManager.loadBoard();
@@ -562,6 +581,7 @@ export class LynvoPanel {
         codeLinkStates,
         remotePending: GitService.getRemotePending(),
         activeIdentityId: DataManager.getActiveIdentityId(),
+        completionColumns: LynvoPanel.getCompletionColumns(),
       });
     }
   }
@@ -701,6 +721,7 @@ export class LynvoPanel {
               data: board,
               codeLinkStates,
               activeIdentityId: DataManager.getActiveIdentityId(),
+              completionColumns: LynvoPanel.getCompletionColumns(),
               // Include the current bundle so that a (re)initialized webview
               // (e.g. after VS Code re-navigated it to its seed HTML)
               // renders in the active language, not the stale seed.

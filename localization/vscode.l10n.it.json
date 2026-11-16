@@ -353,6 +353,7 @@
   "Match none of the selected skills ( ! )": "Non corrisponde a nessuna delle abilità selezionate ( ! )",
   "Label names cannot contain spaces or the # symbol.": "I nomi delle etichette non possono contenere spazi o il simbolo #.",
   "Label names must be a single word or a compact token (e.g. UI, R&D, CI-CD). Spaces and the # symbol are not allowed.": "I nomi delle etichette devono essere una singola parola o un token compatto (es. UI, R&D, CI-CD). Non sono ammessi spazi o il simbolo #.",
+  "Only labels currently in use are counted. See Completion Columns setting." : "Vengono conteggiate solo le etichette attualmente in uso. Vedi le impostazioni dell'estensione (completionColumns).",
   "All columns": "Tutte le colonne",
   "Filter workforce metrics by column": "Filtra le metriche del team per colonna",
   "Anonymous": "Anonimo"
