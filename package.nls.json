@@ -19,6 +19,7 @@
   "configuration.language.description" : "Language for the Lynvo interface. Use 'auto' to follow the VS Code language, or a code matching the available localization (e.g. 'en', 'es'). Display language can also be changed at runtime with 'Lynvo: Switch Language'.",
   "configuration.inCodeEditing.description": "When enabled, editing a code-linked task's title, description, checklist, or relations on the board also updates the TODO comment in the linked source file. Disable to keep the board and the code independent.",
   "configuration.completionColumns.description": "Column names (or part of them, matched case-insensitively) that offer the 'remove linked TODO comments' nudge. Tasks in these columns are excluded from the labels usage count.",
+  "configuration.progressionColumns.description": "Column names (or part of them, matched case-insensitively) whose tasks are considered Active / In Progress for the Insights 'In progress' metric.",
   "configuration.activityLog.description": "Log each activity type in the Activity history. Set a type to false to stop logging it. Untyped or missing entries stay logged by default.",
   "views.projectActions.name": "Project Actions"
 }

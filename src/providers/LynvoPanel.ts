@@ -571,6 +571,26 @@ export class LynvoPanel {
     }
   }
 
+  /**
+   * Column-name fragments (lynvo.progressionColumns setting) whose tasks are
+   * considered Active / In Progress for the Insights "In progress" metric.
+   * An explicit empty list is honored as "no column"; a missing/invalid value
+   * falls back to none as we cannot guess what the end-user wants as
+   * progression column name.
+   */
+  private static getProgressionColumns(): string[] {
+    try {
+      const raw = vscode.workspace.getConfiguration("lynvo").get<unknown>("progressionColumns");
+      if (!Array.isArray(raw)) {return [];}
+      return raw
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
   public static async refreshData() {
     if (LynvoPanel.currentPanel) {
       const board = await DataManager.loadBoard();
@@ -582,6 +602,7 @@ export class LynvoPanel {
         remotePending: GitService.getRemotePending(),
         activeIdentityId: DataManager.getActiveIdentityId(),
         completionColumns: LynvoPanel.getCompletionColumns(),
+        progressionColumns: LynvoPanel.getProgressionColumns(),
       });
     }
   }
@@ -754,6 +775,7 @@ export class LynvoPanel {
               codeLinkStates,
               activeIdentityId: DataManager.getActiveIdentityId(),
               completionColumns: LynvoPanel.getCompletionColumns(),
+              progressionColumns: LynvoPanel.getProgressionColumns(),
               // Include the current bundle so that a (re)initialized webview
               // (e.g. after VS Code re-navigated it to its seed HTML)
               // renders in the active language, not the stale seed.

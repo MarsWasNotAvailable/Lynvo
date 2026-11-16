@@ -373,7 +373,7 @@ const clampMapZoom = (value: number): number =>
 type CodeLinkState = "synced" | "diverged" | "broken";
 
 type WebviewInboundMessage =
-  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; activeIdentityId?: string; completionColumns?: string[]; bundle?: l10nJsonFormat }
+  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; activeIdentityId?: string; completionColumns?: string[]; progressionColumns?: string[]; bundle?: l10nJsonFormat }
   | { command: "setCodeLinkStates"; states: Record<string, CodeLinkState> }
   | { command: "setRemotePending"; pending: boolean }
   | { command: "switchView"; view: LynvoView }
@@ -406,6 +406,9 @@ const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
       activeIdentityId: typeof value.activeIdentityId === "string" ? value.activeIdentityId : undefined,
       completionColumns: Array.isArray(value.completionColumns)
         ? (value.completionColumns as unknown[]).filter((entry): entry is string => typeof entry === "string")
+        : undefined,
+      progressionColumns: Array.isArray(value.progressionColumns)
+        ? (value.progressionColumns as unknown[]).filter((entry): entry is string => typeof entry === "string")
         : undefined,
       bundle: isRecord(value.bundle) ? (value.bundle as l10nJsonFormat) : undefined,
     };
@@ -1199,6 +1202,9 @@ export const App: React.FC = () => {
   // Column-name fragments (lynvo.completionColumns setting) that offer the
   // "remove linked TODO comments" nudge, and are excluded from label usage counts.
   const [completionColumns, setCompletionColumns] = useState<string[]>([]);
+  // Column-name fragments (lynvo.progressionColumns setting) whose tasks are
+  // considered Active / In Progress for the Insights "In progress" metric.
+  const [progressionColumns, setProgressionColumns] = useState<string[]>([]);
   const [newIdentityName, setNewIdentityName] = useState("");
   const [newIdentityDomain, setNewIdentityDomain] = useState("local");
   // Whether the newly-created identity should become the active one right away.
@@ -1364,6 +1370,9 @@ export const App: React.FC = () => {
         if (message.completionColumns) {
           setCompletionColumns(message.completionColumns);
         }
+        if (message.progressionColumns) {
+          setProgressionColumns(message.progressionColumns);
+        }
         // A (re)initialized webview applies the host's active-language bundle
         // before its first render, so that it never shows a stale seed language.
         if (message.bundle) {
@@ -1495,6 +1504,16 @@ export const App: React.FC = () => {
   const isCompletionColumn = (title: string): boolean => {
     const lower = title.toLowerCase();
     return completionColumns.some((term) => {
+      const needle = term.toLowerCase();
+      return needle.length > 0 && lower.includes(needle);
+    });
+  };
+
+  // Whether a column title matches the progressionColumns setting (case-insensitive "includes");
+  // those columns' tasks are considered Active / In Progress for the Insights metrics.
+  const isProgressColumn = (title: string): boolean => {
+    const lower = title.toLowerCase();
+    return progressionColumns.some((term) => {
       const needle = term.toLowerCase();
       return needle.length > 0 && lower.includes(needle);
     });
@@ -1652,13 +1671,18 @@ export const App: React.FC = () => {
   const metrics = useMemo(() => {
     const now = Date.now();
     const doneIds = sortedColumns
-      .filter((col) => col.title.toLowerCase().includes("done"))
+      .filter((col) => isCompletionColumn(col.title))
+      .map((col) => col.id);
+    const progressIds = sortedColumns
+      .filter((col) => isProgressColumn(col.title))
       .map((col) => col.id);
     const completed = tasks.filter((task) => doneIds.includes(task.status)).length;
     const overdue = tasks.filter(
       (task) => task.dueDate && task.dueDate < now && !doneIds.includes(task.status),
     ).length;
-    const stale = tasks.filter((task) => now - task.updatedAt > 1000 * 60 * 60 * 24 * 7).length;
+    const stale = tasks.filter(
+      (task) => now - task.updatedAt > 1000 * 60 * 60 * 24 * 7 && !doneIds.includes(task.status),
+    ).length;
 
     return {
       total: tasks.length,
@@ -1667,13 +1691,10 @@ export const App: React.FC = () => {
       overdue,
       stale,
       inProgress: tasks.filter((task) =>
-        sortedColumns
-          .find((col) => col.id === task.status)
-          ?.title.toLowerCase()
-          .includes("progress"),
+        progressIds.includes(task.status) && !doneIds.includes(task.status),
       ).length,
     };
-  }, [tasks, sortedColumns]);
+  }, [tasks, sortedColumns, completionColumns, progressionColumns]);
 
   const triggerSync = () => {
     setIsSyncing(true);
@@ -4101,7 +4122,7 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ flex: "1 1 320px", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "20px", borderRadius: "6px" }}>
+        <div style={{ flex: "1 1 320px", backgroundColor: "var(--lynvo-panel)", padding: "20px", borderRadius: "6px" }}>
           <h3 style={{ marginTop: 0 }}>{t("Status Breakdown")}</h3>
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {Object.entries(statusStats).map(([status, count]) => (
@@ -4112,7 +4133,7 @@ export const App: React.FC = () => {
           </ul>
         </div>
 
-        <div style={{ flex: "1 1 100%", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "20px", borderRadius: "6px" }}>
+        <div style={{ flex: "1 1 100%", backgroundColor: "var(--lynvo-panel)", padding: "20px", borderRadius: "6px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "8px" }}>
             <h3 style={{ margin: 0 }}>{t("Workforce spread")}</h3>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
@@ -4152,7 +4173,7 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ flex: "1 1 320px", backgroundColor: "var(--vscode-editor-inactiveSelectionBackground)", padding: "20px", borderRadius: "6px" }}>
+        <div style={{ flex: "1 1 320px", backgroundColor: "var(--lynvo-panel)", padding: "20px", borderRadius: "6px" }}>
           <h3 style={{ marginTop: 0 }}>{t("Risk Metrics")}</h3>
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
               <li style={{ padding: "8px 0", borderBottom: "1px solid var(--vscode-widget-border)" }}>

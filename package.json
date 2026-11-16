@@ -179,6 +179,17 @@
           ],
           "description": "%configuration.completionColumns.description%"
         },
+        "lynvo.progressionColumns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "In Progress",
+            "Doing"
+          ],
+          "description": "%configuration.progressionColumns.description%"
+        },
         "lynvo.activityLog": {
           "type": "object",
           "default": {
