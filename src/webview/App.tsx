@@ -373,7 +373,7 @@ const clampMapZoom = (value: number): number =>
 type CodeLinkState = "synced" | "diverged" | "broken";
 
 type WebviewInboundMessage =
-  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; activeIdentityId?: string; completionColumns?: string[]; progressionColumns?: string[]; bundle?: l10nJsonFormat }
+  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; activeIdentityId?: string; completionColumns?: string[]; progressionColumns?: string[]; inCodeEditingEnabled?: boolean; bundle?: l10nJsonFormat }
   | { command: "setCodeLinkStates"; states: Record<string, CodeLinkState> }
   | { command: "setRemotePending"; pending: boolean }
   | { command: "switchView"; view: LynvoView }
@@ -410,6 +410,7 @@ const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
       progressionColumns: Array.isArray(value.progressionColumns)
         ? (value.progressionColumns as unknown[]).filter((entry): entry is string => typeof entry === "string")
         : undefined,
+      inCodeEditingEnabled: typeof value.inCodeEditingEnabled === "boolean" ? value.inCodeEditingEnabled : undefined,
       bundle: isRecord(value.bundle) ? (value.bundle as l10nJsonFormat) : undefined,
     };
   }
@@ -690,6 +691,8 @@ const lynvoStyles = `
     --lynvo-code-link: var(--vscode-editorComment-foreground, #3fb950);
     --lynvo-code-link-broken: var(--vscode-editorError-foreground, #f85149);
     --lynvo-code-link-diverged: var(--vscode-editorWarning-foreground, #d29922);
+    /* Code link present but "Enable In-Code Editing" is off: link-only, no propagation. */
+    --lynvo-code-link-detached: var(--vscode-charts-blue, #58a6ff);
     --lynvo-radius: 8px;
   }
 
@@ -1205,6 +1208,9 @@ export const App: React.FC = () => {
   // Column-name fragments (lynvo.progressionColumns setting) whose tasks are
   // considered Active / In Progress for the Insights "In progress" metric.
   const [progressionColumns, setProgressionColumns] = useState<string[]>([]);
+  // Whether board -> code propagation is on (lynvo.enableInCodeEditing setting).
+  // When off, a code-linked task keeps its own data on both sides (link-only).
+  const [inCodeEditingEnabled, setInCodeEditingEnabled] = useState(true);
   const [newIdentityName, setNewIdentityName] = useState("");
   const [newIdentityDomain, setNewIdentityDomain] = useState("local");
   // Whether the newly-created identity should become the active one right away.
@@ -1372,6 +1378,9 @@ export const App: React.FC = () => {
         }
         if (message.progressionColumns) {
           setProgressionColumns(message.progressionColumns);
+        }
+        if (message.inCodeEditingEnabled !== undefined) {
+          setInCodeEditingEnabled(message.inCodeEditingEnabled);
         }
         // A (re)initialized webview applies the host's active-language bundle
         // before its first render, so that it never shows a stale seed language.
@@ -2266,6 +2275,9 @@ export const App: React.FC = () => {
   const renderTaskCard = (task: LynvoTask) => {
     const isEditing = editingTaskId === task.id;
     const isCodeLinked = Boolean(task.codeReference?.todoId);
+    // Accent color for the "linked to code" affordances: green when propagation
+    // is on, blue when "Enable In-Code Editing" is off (link-only mode).
+    const codeLinkAccent = inCodeEditingEnabled ? "var(--lynvo-code-link)" : "var(--lynvo-code-link-detached)";
     const isEdited = task.updatedAt - task.createdAt > 60000;
     const priority = getTaskPriority(task);
     const dueDate = task.dueDate;
@@ -2305,14 +2317,14 @@ export const App: React.FC = () => {
               autoFocus
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
-              style={{ width: "100%", marginBottom: "8px", padding: "6px", boxSizing: "border-box", ...(isCodeLinked ? { outline: "2px solid var(--lynvo-code-link)", outlineOffset: "1px" } : {}) }}
+              style={{ width: "100%", marginBottom: "8px", padding: "6px", boxSizing: "border-box", ...(isCodeLinked ? { outline: `2px solid ${codeLinkAccent}`, outlineOffset: "1px" } : {}) }}
             />
             <textarea
               placeholder={t("Write a description of the task here")}
               value={editDesc}
               onChange={(e) => setEditDesc(e.target.value)}
               rows={3}
-              style={{ width: "100%", marginBottom: "8px", padding: "6px", boxSizing: "border-box", ...(isCodeLinked ? { outline: "2px solid var(--lynvo-code-link)", outlineOffset: "1px" } : {}) }}
+              style={{ width: "100%", marginBottom: "8px", padding: "6px", boxSizing: "border-box", ...(isCodeLinked ? { outline: `2px solid ${codeLinkAccent}`, outlineOffset: "1px" } : {}) }}
             />
             <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
               <select
@@ -2484,7 +2496,7 @@ export const App: React.FC = () => {
                 <span
                   style={{
                     marginRight: "auto",
-                    color: "var(--lynvo-code-link)",
+                    color: codeLinkAccent,
                     fontSize: "12px",
                     fontWeight: 700,
                     display: "inline-flex",
@@ -2502,7 +2514,7 @@ export const App: React.FC = () => {
               <button
                 onClick={saveEditTask}
                 style={{
-                  backgroundColor: isCodeLinked ? "var(--lynvo-code-link)" : "var(--vscode-button-background)",
+                  backgroundColor: isCodeLinked ? codeLinkAccent : "var(--vscode-button-background)",
                   color: "white",
                   border: "none",
                   padding: "4px 8px",
@@ -2547,19 +2559,21 @@ export const App: React.FC = () => {
                           ? "var(--lynvo-code-link-broken)"
                           : codeLinkStates[task.id] === "diverged"
                             ? "var(--lynvo-code-link-diverged)"
-                            : "var(--lynvo-code-link)",
+                            : codeLinkAccent,
                     }}
                     onClick={() => {
-                      if (codeLinkStates[task.id] === "diverged") {
+                      if (inCodeEditingEnabled && codeLinkStates[task.id] === "diverged") {
                         vscode.postMessage({ command: "relinkTodo", taskId: task.id });
                       }
                     }}
                     title={
-                      codeLinkStates[task.id] === "diverged"
-                        ? t("Code changed — click to copy it back to the board")
-                        : codeLinkStates[task.id] === "broken"
-                          ? t("Code link broken — use Edit to convert this task")
-                          : t("Synced with the linked code comment")
+                      codeLinkStates[task.id] === "broken"
+                        ? t("Code link broken — use Edit to convert this task")
+                        : !inCodeEditingEnabled
+                          ? t("Linked to the code comment — in-code editing is disabled, so board changes are not propagated to the code.")
+                          : codeLinkStates[task.id] === "diverged"
+                            ? t("Code changed — click to copy it back to the board")
+                            : t("Synced with the linked code comment")
                     }
                     aria-label={t("Code link")}
                   >

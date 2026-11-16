@@ -65,6 +65,20 @@ async function computeCodeLinkStates(
       task.codeReference?.filePath &&
       isSafeWorkspaceRelativePath(task.codeReference.filePath),
   );
+  // In-code editing disabled: the board and the code keep their own data,
+  // so we only track that the Lynvo Tracker (marker) is still present.
+  if (!isInCodeEditingEnabled()) {
+    await Promise.all(
+      linked.map(async (task) => {
+        const parsed = await readTodoComment(
+          task.codeReference!.filePath!,
+          task.codeReference!.todoId!,
+        );
+        states[task.id] = parsed ? "synced" : "broken";
+      }),
+    );
+    return states;
+  }
   await Promise.all(
     linked.map(async (task) => {
       const parsed = await readTodoComment(
@@ -603,6 +617,7 @@ export class LynvoPanel {
         activeIdentityId: DataManager.getActiveIdentityId(),
         completionColumns: LynvoPanel.getCompletionColumns(),
         progressionColumns: LynvoPanel.getProgressionColumns(),
+        inCodeEditingEnabled: isInCodeEditingEnabled(),
       });
     }
   }
@@ -776,6 +791,7 @@ export class LynvoPanel {
               activeIdentityId: DataManager.getActiveIdentityId(),
               completionColumns: LynvoPanel.getCompletionColumns(),
               progressionColumns: LynvoPanel.getProgressionColumns(),
+              inCodeEditingEnabled: isInCodeEditingEnabled(),
               // Include the current bundle so that a (re)initialized webview
               // (e.g. after VS Code re-navigated it to its seed HTML)
               // renders in the active language, not the stale seed.
@@ -1818,6 +1834,12 @@ export class LynvoPanel {
             return;
           }
           case "relinkTodo": {
+            if (!isInCodeEditingEnabled()) {
+              vscode.window.showInformationMessage(
+                t("In-code editing is disabled — the board and the code keep their own data."),
+              );
+              return;
+            }
             const taskId = asString(message.taskId);
             if (!taskId) {
               return;

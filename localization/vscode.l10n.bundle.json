@@ -270,6 +270,8 @@
   "Could not find the linked TODO comment in the code.": "Could not find the linked TODO comment in the code.",
   "Could not write to the linked code file. The board was not updated — fix the file and try again.": "Could not write to the linked code file. The board was not updated — fix the file and try again.",
   "Synced with the linked code comment": "Synced with the linked code comment",
+  "In-code editing is disabled — the board and the code keep their own data.": "In-code editing is disabled — the board and the code keep their own data.",
+  "Linked to the code comment — in-code editing is disabled, so board changes are not propagated to the code.": "Linked to the code comment — in-code editing is disabled, so board changes are not propagated to the code.",
   "Task re-synced from code.": "Task re-synced from code.",
   "The code linked to this task could not be found (file deleted/renamed, or the marker removed). Convert this promoted task to a normal task? The link will be removed.": "The code linked to this task could not be found (file deleted/renamed, or the marker removed). Convert this promoted task to a normal task? The link will be removed.",
   "This task is linked to a TODO comment in your code. Editing the title or description here writes to that comment in place (unsaved changes are respected). If you edit the comment in the code instead, the link goes stale — click the chain icon next to the title to re-sync it back to the board.": "This task is linked to a TODO comment in your code. Editing the title or description here writes to that comment in place (unsaved changes are respected). If you edit the comment in the code instead, the link goes stale — click the chain icon next to the title to re-sync it back to the board.",

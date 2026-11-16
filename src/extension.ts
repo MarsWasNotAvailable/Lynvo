@@ -812,6 +812,17 @@ export function activate(context: vscode.ExtensionContext) {
       LynvoPanel.scheduleCodeLinkStateRefresh(rel);
     }),
   );
+
+  // Toggling "Enable In-Code Editing" switches the chain-link meaning on the
+  // Task View (propagating vs. link-only) and the divergence tracking,
+  // so recompute the code-link states and push the new flag to the webview.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (!event.affectsConfiguration("lynvo.enableInCodeEditing")) {return;}
+      if (!LynvoPanel.currentPanel) {return;}
+      void LynvoPanel.refreshData();
+    }),
+  );
 }
 
 export function deactivate() {}
