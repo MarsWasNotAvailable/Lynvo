@@ -679,7 +679,16 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-
+  context.subscriptions.push(
+    vscode.commands.registerCommand("lynvo.showSettings", () => {
+      // Opens VS Code's built-in settings panel scoped to this extension
+      // (the "@ext:" query matches the extension id exactly).
+      void vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        `@ext:${context.extension.id}`,
+      );
+    }),
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("lynvo.openBoard", () => {

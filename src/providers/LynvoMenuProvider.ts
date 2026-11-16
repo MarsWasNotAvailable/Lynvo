@@ -103,6 +103,12 @@ export class LynvoMenuProvider
       tooltip: "Change the interface language",
       icon: "globe",
     },
+    {
+      label: "Show Settings",
+      command: "lynvo.showSettings",
+      tooltip: "Open the Lynvo settings in the VS Code settings panel",
+      icon: "gear",
+    },
   ];
 
   getTreeItem(element: vscode.TreeItem): vscode.TreeItem {

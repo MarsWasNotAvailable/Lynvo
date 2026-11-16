@@ -198,6 +198,8 @@
   "Install Agent Skills": "Instalar skills de agente",
   "Switch Language": "Cambiar idioma",
   "Change the interface language": "Cambiar el idioma de la interfaz",
+  "Show Settings": "Mostrar ajustes",
+  "Open the Lynvo settings in the VS Code settings panel": "Abrir los ajustes de Lynvo en el panel de ajustes de VS Code",
   "Select interface language": "Seleccionar idioma de la interfaz",
   "Choose the language for the Lynvo interface": "Elige el idioma de la interfaz de Lynvo",
   "Follow VS Code language": "Seguir el idioma de VS Code",
