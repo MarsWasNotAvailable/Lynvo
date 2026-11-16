@@ -64,6 +64,7 @@ type WebviewOutboundMessage =
   | { command: "editColumn"; colId: string; title: string; color: string }
   | { command: "deleteColumn"; colId: string }
   | { command: "clearColumnTasks"; colId: string }
+  | { command: "clearActivities" }
   | { command: "reorderColumns"; updates: Array<{ id: string; position: number }> }
   | { command: "createLabel"; name: string; color: string }
   | { command: "updateLabel"; labelId: string; name: string; color: string }
@@ -4627,6 +4628,16 @@ export const App: React.FC = () => {
 	                {t("Clear")}
 	              </button>
 	            )}
+	            <button
+	              type="button"
+	              className="icon-btn delete"
+	              onClick={() => vscode.postMessage({ command: "clearActivities" })}
+	              title={t("Clear all activities")}
+	              aria-label={t("Clear all activities")}
+	              style={{ ...iconButtonStyle, marginLeft: "auto", color: "var(--vscode-errorForeground)" }}
+	            >
+	              <DeleteIcon />
+	            </button>
 	          </div>
 	        )}
 	        {activityItems.length === 0 ? (

@@ -678,6 +678,16 @@ export class DataManager {
     }
   }
 
+  /**
+   * Remove all stored activities: clears the board's activity records;
+   * the now-orphaned `activity/*.json` files are deleted by the save process.
+   */
+  public static async clearActivities(): Promise<void> {
+    await this.mutateBoard((board) => {
+      board.activity = {};
+    });
+  }
+
   private static addTombstone(
     board: LynvoBoard,
     entityType: LynvoTombstone["entityType"],

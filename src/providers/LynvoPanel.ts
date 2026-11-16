@@ -696,6 +696,38 @@ export class LynvoPanel {
     });
   }
 
+  /**
+   * Clear all stored activities (invoked from the Command Palette command
+   * `lynvo.clearActivities`, or the Activity panel's trash button).
+   * Asks for confirmation before deleting; no-ops when the board has none.
+   */
+  public static async clearActivities(): Promise<void> {
+    const board = await DataManager.loadBoard();
+    if (!board) {
+      vscode.window.showWarningMessage(
+        t("Lynvo board not found. Open a project folder first."),
+      );
+      return;
+    }
+    const activityCount = Object.keys(board.activity || {}).length;
+    if (activityCount === 0) {
+      vscode.window.showInformationMessage(t("No activity to clear."));
+      return;
+    }
+    const clearLabel = t("Clear");
+    const confirmed = await vscode.window.showWarningMessage(
+      t("Clear all {0} activities? This cannot be undone.", activityCount),
+      { modal: true },
+      clearLabel,
+    );
+    if (confirmed !== clearLabel) {
+      return;
+    }
+    await DataManager.clearActivities();
+    vscode.window.showInformationMessage(t("All activities cleared."));
+    await LynvoPanel.refreshDataAndScheduleSync();
+  }
+
   public dispose() {
     LynvoPanel.currentPanel = undefined;
     this._panel.dispose();
@@ -1369,6 +1401,10 @@ export class LynvoPanel {
               t("Removed {0} task(s) from the column.", tasksInColumn.length),
             );
             LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
+          case "clearActivities": {
+            await LynvoPanel.clearActivities();
             return;
           }
           case "reorderColumns": {

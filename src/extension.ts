@@ -691,6 +691,12 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("lynvo.clearActivities", async () => {
+      await LynvoPanel.clearActivities();
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("lynvo.openBoard", () => {
       LynvoPanel.render(context.extensionUri, "board");
     }),

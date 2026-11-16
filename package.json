@@ -47,7 +47,8 @@
     "onCommand:lynvo.createIdentity",
     "onCommand:lynvo.installSkills",
     "onCommand:lynvo.setLanguage",
-    "onCommand:lynvo.showSettings"
+    "onCommand:lynvo.showSettings",
+    "onCommand:lynvo.clearActivities"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -111,6 +112,10 @@
       {
         "command": "lynvo.showSettings",
         "title": "%command.showSettings%"
+      },
+      {
+        "command": "lynvo.clearActivities",
+        "title": "%command.clearActivities%"
       }
     ],
     "authentication": [
