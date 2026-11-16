@@ -163,6 +163,47 @@
           "type": "boolean",
           "default": true,
           "description": "%configuration.inCodeEditing.description%"
+        },
+        "lynvo.activityLog": {
+          "type": "object",
+          "default": {
+            "task_created": true,
+            "task_updated": true,
+            "task_renamed": true,
+            "task_moved": true,
+            "task_deleted": true,
+            "link_added": true,
+            "link_removed": true,
+            "column_created": true,
+            "column_updated": true,
+            "column_renamed": true,
+            "column_color_changed": true,
+            "column_deleted": true,
+            "label_created": true,
+            "label_renamed": true,
+            "label_color_changed": true,
+            "label_deleted": true,
+            "checklist_added": true,
+            "checklist_updated": true,
+            "checklist_renamed": true,
+            "checklist_completed": true,
+            "checklist_reopened": true,
+            "checklist_deleted": true,
+            "relation_added": true,
+            "relation_deleted": true,
+            "relation_block_added": true,
+            "relation_block_deleted": true,
+            "relation_blockedby_added": true,
+            "relation_blockedby_deleted": true,
+            "relation_duplicates_added": true,
+            "relation_duplicates_deleted": true,
+            "identity_created": true,
+            "identity_renamed": true,
+            "identity_deleted": true,
+            "domain_created": true,
+            "domain_deleted": true
+          },
+          "description": "%configuration.activityLog.description%"
         }
       }
     }

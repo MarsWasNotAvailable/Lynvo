@@ -645,6 +645,9 @@ export class DataManager {
     actor: LynvoIdentity | undefined,
     options: Pick<LynvoActivity, "taskId" | "targetTaskId" | "metadata"> = {},
   ): void {
+    // Activity logging is optional per type (lynvo.activityLog setting):
+    // early-return when the type is explicitly switched off.
+    if (!this.isActivityLoggingEnabled(type)) {return;}
     const id = this.createId("activity");
     board.activity = board.activity || {};
     board.activity[id] = {
@@ -657,6 +660,22 @@ export class DataManager {
       createdAt: Date.now(),
       ...options,
     };
+  }
+
+  /**
+   * Consult the `lynvo.activityLog` setting: an activity type is logged
+   * unless it is explicitly set to `false`. Missing entries (including
+   * future types not yet listed) stay logged by default.
+   */
+  private static isActivityLoggingEnabled(type: LynvoActivityType): boolean {
+    try {
+      const prefs = vscode.workspace
+        .getConfiguration("lynvo")
+        .get<Record<string, boolean | undefined>>("activityLog");
+      return prefs?.[type] !== false;
+    } catch {
+      return true;
+    }
   }
 
   private static addTombstone(
