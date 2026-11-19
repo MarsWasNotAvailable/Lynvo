@@ -161,6 +161,13 @@
         },
         "lynvo.language": {
           "type": "string",
+          "enum": [
+            "auto",
+            "de",
+            "en",
+            "es",
+            "it"
+          ],
           "default": "auto",
           "description": "%configuration.language.description%"
         },

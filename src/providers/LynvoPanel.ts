@@ -12,12 +12,16 @@ import {
 } from "../relationModel";
 import {
   ALL_TRADE_SKILL,
+  LYNVO_PANELS,
+  LYNVO_PANELS_ID,
+  LYNVO_PANELS_VISIBLE_FALLBACK,
   LynvoBoard,
   LynvoTask,
   LynvoTaskRelation,
   LynvoTaskRelationType,
   LynvoTaskView,
 } from "../types";
+import type { LynvoView } from "../types";
 import {
   findMarkerLineIndex,
   formatAssigneeRef,
@@ -128,15 +132,6 @@ async function computeCodeLinkStates(
   );
   return states;
 }
-
-type LynvoView =
-  | "board"
-  | "table"
-  | "activity"
-  | "conflicts"
-  | "insights"
-  | "labels"
-  | "identities";
 
 type WebviewMessage = {
   command?: string;
@@ -532,8 +527,16 @@ export class LynvoPanel {
 
   public static render(
     extensionUri: vscode.Uri,
-    initialView: LynvoView = "board",
+    initialView: LynvoView = LYNVO_PANELS_VISIBLE_FALLBACK,
   ) {
+    // A panel hidden by the lynvo.visiblePanels setting is not openable on demand:
+    // open on the first visible panel instead, and tell the user why.
+    if (LynvoPanel.isPanelHidden(initialView)) {
+      vscode.window.showInformationMessage(
+        t("This Panel is currently hidden per your preferences. See the extension settings."),
+      );
+      initialView = LynvoPanel.firstVisiblePanel();
+    }
     if (LynvoPanel.currentPanel) {
       LynvoPanel.currentPanel._panel.reveal(vscode.ViewColumn.One);
       // Re-apply the active-language bundle on every reveal:
@@ -604,6 +607,29 @@ export class LynvoPanel {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Whether a panel is hidden by the lynvo.visiblePanels setting.
+   * Matching is case-insensitive, on the panel id or its English name;
+   * an empty list keeps all panels visible.
+   */
+  public static isPanelHidden(view: LynvoView): boolean {
+    const visible = LynvoPanel.getVisiblePanels();
+    if (visible.length === 0) {return false;}
+    const panel = LYNVO_PANELS.find((entry) => entry.id === view);
+    const normalize = (entry: string) => entry.trim().toLowerCase();
+    return !visible.some(
+      (entry) => normalize(entry) === view
+      || (panel !== undefined && normalize(entry) === panel.name.toLowerCase()),
+    );
+  }
+
+  /** First panel (in top-bar order) that is not hidden;
+   * falls back to the shared fallback panel when all are hidden.
+   */
+  private static firstVisiblePanel(): LynvoView {
+    return LYNVO_PANELS_ID.find((view) => !LynvoPanel.isPanelHidden(view)) ?? LYNVO_PANELS_VISIBLE_FALLBACK;
   }
 
   /**

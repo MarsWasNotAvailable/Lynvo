@@ -23,6 +23,7 @@
   "Which column should the task start in?": "In welcher Spalte soll die Aufgabe beginnen?",
   "Lynvo detected sync conflicts. Open the Conflict Center to resolve them.": "Lynvo hat Synchronisationskonflikte erkannt. Öffne das Konflikt-Center, um sie zu lösen.",
   "Open conflicts": "Konflikte öffnen",
+  "This Panel is currently hidden per your preferences. See the extension settings.": "Dieses Panel ist derzeit gemäß deinen Einstellungen ausgeblendet. Siehe die Einstellungen der Erweiterung.",
   "Lynvo detected team changes and updated the board.": "Lynvo hat Teamänderungen erkannt und das Board aktualisiert.",
   "Connected as: {0}": "Angemeldet als: {0}",
   "Lynvo synced the board, but there are conflicts to resolve.": "Lynvo hat das Board synchronisiert, aber es gibt Konflikte, die gelöst werden müssen.",

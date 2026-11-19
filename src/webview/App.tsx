@@ -4,6 +4,9 @@ import { setWebviewLanguage, t } from "./i18n";
 import type { l10nJsonFormat } from "@vscode/l10n";
 import {
   ALL_TRADE_SKILL,
+  LYNVO_PANELS,
+  LYNVO_PANELS_ID,
+  LYNVO_PANELS_VISIBLE_FALLBACK,
   LynvoActivity,
   LynvoBoard,
   LynvoColumn,
@@ -13,6 +16,7 @@ import {
   LynvoTaskRelationType,
   LynvoTaskView,
 } from "../types";
+import type { LynvoView } from "../types";
 import { fullRelationsForTask, hasRelationBetween } from "../relationModel";
 
 type WebviewOutboundMessage =
@@ -366,8 +370,6 @@ const LinkIcon = () => (
   </svg>
 );
 
-type LynvoView = "board" | "table" | "activity" | "conflicts" | "insights" | "labels" | "identities";
-
 type Priority = "low" | "medium" | "high";
 type TableMode = "rows" | "map";
 type MapNodePosition = { x: number; y: number };
@@ -410,26 +412,7 @@ const isLynvoTaskView = (value: unknown): value is LynvoTaskView =>
   value === "collapsed" || value === "normal" || value === "full";
 
 const isLynvoView = (value: unknown): value is LynvoView =>
-  value === "board" ||
-  value === "table" ||
-  value === "activity" ||
-  value === "conflicts" ||
-  value === "insights" ||
-  value === "labels" ||
-  value === "identities";
-
-/** Panels of the board, in top-bar order.
- * The stable English `name` values match the `lynvo.visiblePanels` setting.
- */
-const LYNVO_PANELS: { id: LynvoView; name: string }[] = [
-  { id: "board", name: "Board" },
-  { id: "table", name: "Table" },
-  { id: "activity", name: "Activity" },
-  { id: "conflicts", name: "Conflicts" },
-  { id: "insights", name: "Insights" },
-  { id: "labels", name: "Labels" },
-  { id: "identities", name: "Identities" },
-];
+  typeof value === "string" && (LYNVO_PANELS_ID as string[]).includes(value);
 
 /** Whether a panel is listed in the `visiblePanels` setting :
  * matched (case-insensitive) on the panel id or its name (English);
@@ -1258,7 +1241,7 @@ export const App: React.FC = () => {
     }),
     [langVersion],
   );
-  const [activeView, setActiveView] = useState<LynvoView>("board");
+  const [activeView, setActiveView] = useState<LynvoView>(LYNVO_PANELS_VISIBLE_FALLBACK);
   const [tableMode, setTableMode] = useState<TableMode>("rows");
   // Identity management (Manage Identities panel).
   const [activeIdentityId, setActiveIdentityId] = useState<string | undefined>(undefined);
@@ -4958,23 +4941,17 @@ export const App: React.FC = () => {
             <span className="lynvo-brand-mark" aria-hidden="true" />
             <span>Lynvo</span>
           </div>
-          {([
-            { id: "board", label: t("Board") },
-            { id: "table", label: t("Table") },
-            { id: "activity", label: t("Activity") },
-            { id: "conflicts", label: unresolvedConflicts.length ? `${t("Conflicts")} (${unresolvedConflicts.length})` : t("Conflicts") },
-            { id: "insights", label: t("Insights") },
-            { id: "labels", label: t("Labels") },
-            { id: "identities", label: t("Identities") },
-          ] as { id: LynvoView; label: string }[])
-            .filter((item) => isPanelVisible(item.id, visiblePanels))
-            .map((item) => (
+          {LYNVO_PANELS
+            .filter((panel) => isPanelVisible(panel.id, visiblePanels))
+            .map((panel) => (
             <button
-              key={item.id}
-              onClick={() => setActiveView(item.id)}
-              className={`lynvo-tab${currentView === item.id ? " active" : ""}`}
+              key={panel.id}
+              onClick={() => setActiveView(panel.id)}
+              className={`lynvo-tab${currentView === panel.id ? " active" : ""}`}
             >
-              {item.label}
+              {panel.id === "conflicts" && unresolvedConflicts.length > 0
+                ? `${t("Conflicts")} (${unresolvedConflicts.length})`
+                : t(panel.name)}
             </button>
           ))}
 

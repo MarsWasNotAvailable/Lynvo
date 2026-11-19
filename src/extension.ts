@@ -831,11 +831,27 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
+  // Refresh the Board immediately when a Panel is enabled or disabled.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration("lynvo.visiblePanels")) {return;}
       if (!LynvoPanel.currentPanel) {return;}
       void LynvoPanel.refreshData();
+    }),
+  );
+
+  // Refresh the interface to be in the selected language.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (!event.affectsConfiguration("lynvo.language")) {return;}
+      // Re-point the runtime language from the setting first:
+      // applyLanguage() re-pushes only the host's current bundle
+      // to the menu and webview, so without this the stale bundle
+      // would be re-sent and the change would appear to do nothing.
+      setLanguage(vscode.workspace.getConfiguration("lynvo").get<string>("language") || "auto");
+      if (!LynvoPanel.currentPanel) {return;}
+      lynvoMenuProvider.refresh();
+      LynvoPanel.applyLanguage();
     }),
   );
 }

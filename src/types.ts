@@ -7,6 +7,32 @@
 export const ALL_TRADE_SKILL = "lynvo:all-trade";
 
 /**
+ * Panels of the board, in top-bar order.
+ * The stable English `name` values match the `lynvo.visiblePanels` setting
+ * (compared case-insensitively); the `id` values drive the webview routing.
+ * This is the single source of truth shared by the host and the webview:
+ * adding a new panel only requires adding it here.
+ */
+export const LYNVO_PANELS = [
+  { id: "board", name: "Board" },
+  { id: "table", name: "Table" },
+  { id: "activity", name: "Activity" },
+  { id: "conflicts", name: "Conflicts" },
+  { id: "insights", name: "Insights" },
+  { id: "labels", name: "Labels" },
+  { id: "identities", name: "Identities" },
+] as const;
+
+/** The panel identifiers, in top-bar order. */
+export const LYNVO_PANELS_ID = LYNVO_PANELS.map((panel) => panel.id);
+
+/** A board panel identifier. */
+export type LynvoView = (typeof LYNVO_PANELS)[number]["id"];
+
+/** Fallback panel used when a requested panel is not visible (lynvo.visiblePanels setting). */
+export const LYNVO_PANELS_VISIBLE_FALLBACK: LynvoView = "board";
+
+/**
  * A `LynvoIdentity` contains :
  * a generated `id` like `id-mur3r8ds-vow62vvv`,
  * with a fancy name like `John`,

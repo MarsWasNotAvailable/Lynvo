@@ -23,6 +23,7 @@
   "Which column should the task start in?": "Which column should the task start in?",
   "Lynvo detected sync conflicts. Open the Conflict Center to resolve them.": "Lynvo detected sync conflicts. Open the Conflict Center to resolve them.",
   "Open conflicts": "Open conflicts",
+  "This Panel is currently hidden per your preferences. See the extension settings.": "This Panel is currently hidden per your preferences. See the extension settings.",
   "Lynvo detected team changes and updated the board.": "Lynvo detected team changes and updated the board.",
   "Connected as: {0}": "Connected as: {0}",
   "Lynvo synced the board, but there are conflicts to resolve.": "Lynvo synced the board, but there are conflicts to resolve.",
