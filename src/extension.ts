@@ -830,6 +830,14 @@ export function activate(context: vscode.ExtensionContext) {
       void LynvoPanel.refreshData();
     }),
   );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (!event.affectsConfiguration("lynvo.visiblePanels")) {return;}
+      if (!LynvoPanel.currentPanel) {return;}
+      void LynvoPanel.refreshData();
+    }),
+  );
 }
 
 export function deactivate() {}

@@ -395,7 +395,7 @@ const clampMapZoom = (value: number): number =>
 type CodeLinkState = "synced" | "diverged" | "broken";
 
 type WebviewInboundMessage =
-  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; activeIdentityId?: string; completionColumns?: string[]; progressionColumns?: string[]; inCodeEditingEnabled?: boolean; taskView?: LynvoTaskView; bundle?: l10nJsonFormat }
+  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; activeIdentityId?: string; completionColumns?: string[]; progressionColumns?: string[]; visiblePanels?: string[]; inCodeEditingEnabled?: boolean; taskView?: LynvoTaskView; bundle?: l10nJsonFormat }
   | { command: "setCodeLinkStates"; states: Record<string, CodeLinkState> }
   | { command: "setRemotePending"; pending: boolean }
   | { command: "switchView"; view: LynvoView }
@@ -418,6 +418,33 @@ const isLynvoView = (value: unknown): value is LynvoView =>
   value === "labels" ||
   value === "identities";
 
+/** Panels of the board, in top-bar order.
+ * The stable English `name` values match the `lynvo.visiblePanels` setting.
+ */
+const LYNVO_PANELS: { id: LynvoView; name: string }[] = [
+  { id: "board", name: "Board" },
+  { id: "table", name: "Table" },
+  { id: "activity", name: "Activity" },
+  { id: "conflicts", name: "Conflicts" },
+  { id: "insights", name: "Insights" },
+  { id: "labels", name: "Labels" },
+  { id: "identities", name: "Identities" },
+];
+
+/** Whether a panel is listed in the `visiblePanels` setting :
+ * matched (case-insensitive) on the panel id or its name (English);
+ * an empty list keeps all panels visible.
+ */
+const isPanelVisible = (id: LynvoView, visiblePanels: string[]): boolean => {
+  if (visiblePanels.length === 0) {return true;}
+  const panel = LYNVO_PANELS.find((entry) => entry.id === id);
+  const normalize = (entry: string) => entry.trim().toLowerCase();
+  return visiblePanels.some(
+    (entry) => normalize(entry) === id
+    || (panel !== undefined && normalize(entry) === panel.name.toLowerCase()),
+  );
+};
+
 /** Cuts a string off after the `max`th character, adding an ellipsis to imply it is longer. */
 const truncateText = (value: string, max: number): string =>
   value.length > max ? `${value.slice(0, max)}…` : value;
@@ -438,6 +465,9 @@ const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
         : undefined,
       progressionColumns: Array.isArray(value.progressionColumns)
         ? (value.progressionColumns as unknown[]).filter((entry): entry is string => typeof entry === "string")
+        : undefined,
+      visiblePanels: Array.isArray(value.visiblePanels)
+        ? (value.visiblePanels as unknown[]).filter((entry): entry is string => typeof entry === "string")
         : undefined,
       inCodeEditingEnabled: typeof value.inCodeEditingEnabled === "boolean" ? value.inCodeEditingEnabled : undefined,
       taskView: isLynvoTaskView(value.taskView) ? value.taskView : undefined,
@@ -1238,6 +1268,15 @@ export const App: React.FC = () => {
   // Column-name fragments (lynvo.progressionColumns setting) whose tasks are
   // considered Active / In Progress for the Insights "In progress" metric.
   const [progressionColumns, setProgressionColumns] = useState<string[]>([]);
+  // Panel names (lynvo.visiblePanels setting) accessible from the top bar.
+  // An empty list keeps all panels visible so that the board is never without any view.
+  const [visiblePanels, setVisiblePanels] = useState<string[]>([]);
+  // The panel actually rendered: the requested activeView when it is still
+  // accessible from the top bar, otherwise the first visible one.
+  const visiblePanelIds = LYNVO_PANELS.filter((panel) => isPanelVisible(panel.id, visiblePanels)).map((panel) => panel.id);
+  const currentView: LynvoView = visiblePanelIds.includes(activeView)
+    ? activeView
+    : (visiblePanelIds[0] ?? activeView);
   // Whether board -> code propagation is on (lynvo.enableInCodeEditing setting).
   // When off, a code-linked task keeps its own data on both sides (link-only).
   const [inCodeEditingEnabled, setInCodeEditingEnabled] = useState(true);
@@ -1411,6 +1450,9 @@ export const App: React.FC = () => {
         }
         if (message.progressionColumns) {
           setProgressionColumns(message.progressionColumns);
+        }
+        if (message.visiblePanels) {
+          setVisiblePanels(message.visiblePanels);
         }
         if (message.inCodeEditingEnabled !== undefined) {
           setInCodeEditingEnabled(message.inCodeEditingEnabled);
@@ -4924,11 +4966,13 @@ export const App: React.FC = () => {
             { id: "insights", label: t("Insights") },
             { id: "labels", label: t("Labels") },
             { id: "identities", label: t("Identities") },
-          ] as { id: LynvoView; label: string }[]).map((item) => (
+          ] as { id: LynvoView; label: string }[])
+            .filter((item) => isPanelVisible(item.id, visiblePanels))
+            .map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveView(item.id)}
-              className={`lynvo-tab${activeView === item.id ? " active" : ""}`}
+              className={`lynvo-tab${currentView === item.id ? " active" : ""}`}
             >
               {item.label}
             </button>
@@ -4993,7 +5037,7 @@ export const App: React.FC = () => {
           )}
         </div>
 
-        {(activeView === "board" || activeView === "table") && (
+        {(currentView === "board" || currentView === "table") && (
         <div className="lynvo-actions">
           <div className="lynvo-filters">
             <input className="lynvo-search" placeholder={t("Search tasks...")} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
@@ -5014,7 +5058,7 @@ export const App: React.FC = () => {
             </select>
             {isFiltering && <span style={{ fontSize: "10px", color: "var(--vscode-editorWarning-foreground)" }}>{t("Drag & Drop disabled")}</span>}
           </div>
-          {activeView === "board" && (
+          {currentView === "board" && (
             <button
               type="button"
               className="icon-btn"
@@ -5037,7 +5081,7 @@ export const App: React.FC = () => {
         )}
       </div>
 
-      {boardData && activeView === "board" && (
+      {boardData && currentView === "board" && (
         <div className="lynvo-board">
           {sortedColumns.map((col) => {
             const columnTasks = getTasksByStatusFiltered(col.id);
@@ -5181,12 +5225,12 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {boardData && activeView === "table" && renderTableView()}
-      {boardData && activeView === "activity" && renderActivityView()}
-      {boardData && activeView === "conflicts" && renderConflictsView()}
-      {boardData && activeView === "insights" && renderInsights()}
-      {boardData && activeView === "labels" && renderLabelsManager()}
-      {boardData && activeView === "identities" && renderIdentitiesManager()}
+      {boardData && currentView === "table" && renderTableView()}
+      {boardData && currentView === "activity" && renderActivityView()}
+      {boardData && currentView === "conflicts" && renderConflictsView()}
+      {boardData && currentView === "insights" && renderInsights()}
+      {boardData && currentView === "labels" && renderLabelsManager()}
+      {boardData && currentView === "identities" && renderIdentitiesManager()}
     </div>
   );
 };

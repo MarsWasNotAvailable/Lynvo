@@ -190,6 +190,29 @@
           ],
           "description": "%configuration.progressionColumns.description%"
         },
+        "lynvo.visiblePanels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "Board",
+              "Table",
+              "Activity",
+              "Conflicts",
+              "Insights",
+              "Labels",
+              "Identities"
+            ]
+          },
+          "default": [
+            "Board",
+            "Conflicts",
+            "Insights",
+            "Labels",
+            "Identities"
+          ],
+          "description": "%configuration.visiblePanels.description%"
+        },
         "lynvo.activityLog": {
           "type": "object",
           "default": {

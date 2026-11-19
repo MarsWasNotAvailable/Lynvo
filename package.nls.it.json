@@ -20,6 +20,7 @@
   "configuration.inCodeEditing.description": "Quando abilitato, modificare il titolo, la descrizione, la checklist o le relazioni di un compito collegato al codice aggiorna anche il commento TODO nel file sorgente collegato. Disattiva per mantenere il tabellone e il codice indipendenti.",
   "configuration.completionColumns.description": "Nomi di colonna (o parte di essi, senza distinzione tra maiuscole e minuscole) che mostrano il suggerimento per rimuovere i commenti TODO collegati. I compiti in queste colonne non contano nell'uso delle etichette.",
   "configuration.progressionColumns.description": "Nomi di colonna (o parte di essi, senza distinzione tra maiuscole e minuscole) i cui compiti sono considerati Attivi / In corso per la metrica 'In corso' delle metriche.",
+  "configuration.visiblePanels.description": "Pannelli accessibili dalla barra superiore della board Lynvo. Valori validi: Board, Table, Activity, Conflicts, Insights, Labels, Identities.",
   "configuration.activityLog.description": "Registra ogni tipo di attività nel cronologico attività. Imposta un tipo su false per smettere di registrarli. I tipi assenti restano registrati di default.",
   "views.projectActions.name": "Azioni del progetto"
 }

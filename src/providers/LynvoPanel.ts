@@ -606,6 +606,24 @@ export class LynvoPanel {
     }
   }
 
+  /**
+   * Panel names (lynvo.visiblePanels setting) accessible from the top bar.
+   * An empty or invalid list keeps all panels visible so that the board is
+   * never left without any view.
+   */
+  private static getVisiblePanels(): string[] {
+    try {
+      const raw = vscode.workspace.getConfiguration("lynvo").get<unknown>("visiblePanels");
+      if (!Array.isArray(raw)) {return [];}
+      return raw
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
   public static async refreshData() {
     if (LynvoPanel.currentPanel) {
       const board = await DataManager.loadBoard();
@@ -618,6 +636,7 @@ export class LynvoPanel {
         activeIdentityId: DataManager.getActiveIdentityId(),
         completionColumns: LynvoPanel.getCompletionColumns(),
         progressionColumns: LynvoPanel.getProgressionColumns(),
+        visiblePanels: LynvoPanel.getVisiblePanels(),
         inCodeEditingEnabled: isInCodeEditingEnabled(),
         taskView: LynvoPanel.getTaskView(),
       });
@@ -826,6 +845,7 @@ export class LynvoPanel {
               activeIdentityId: DataManager.getActiveIdentityId(),
               completionColumns: LynvoPanel.getCompletionColumns(),
               progressionColumns: LynvoPanel.getProgressionColumns(),
+              visiblePanels: LynvoPanel.getVisiblePanels(),
               inCodeEditingEnabled: isInCodeEditingEnabled(),
               taskView: LynvoPanel.getTaskView(),
               // Include the current bundle so that a (re)initialized webview

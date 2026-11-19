@@ -20,6 +20,7 @@
   "configuration.inCodeEditing.description": "Wenn aktiviert, aktualisiert das Bearbeiten von Titel, Beschreibung, Checkliste oder Relationen einer an den Code verknüpften Aufgabe auch den TODO-Kommentar in der verknüpften Quelldatei. Deaktivieren, um Board und Code unabhängig zu halten.",
   "configuration.completionColumns.description": "Spaltennamen (oder Teile davon, unterscheidet nicht zwischen Groß- und Kleinschreibung), die den Vorschlag zum Entfernen der verknüpften TODO-Kommentare zeigen. Aufgaben in diesen Spalten zählen nicht in die Label-Nutzung.",
   "configuration.progressionColumns.description": "Spaltennamen (oder Teile davon, unterscheidet nicht zwischen Groß- und Kleinschreibung), deren Aufgaben als Aktiv / In Progress für die Kennzahl \"In Progress\" in den Kennzahlen zählen.",
+  "configuration.visiblePanels.description": "Panels, die in der oberen Leiste des Lynvo-Boards verfügbar sind. Gültige Werte: Board, Table, Activity, Conflicts, Insights, Labels, Identities.",
   "configuration.activityLog.description": "Protokolliert jeden Aktivitätstyp im Aktivitätsverlauf. Ein Typ auf false gesetzt, stoppt seine Protokollierung. Fehlende Typen werden standardmäßig protokolliert.",
   "views.projectActions.name": "Projektaktionen"
 }

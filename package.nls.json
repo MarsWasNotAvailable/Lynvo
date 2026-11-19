@@ -20,6 +20,7 @@
   "configuration.inCodeEditing.description": "When enabled, editing a code-linked task's title, description, checklist, or relations on the board also updates the TODO comment in the linked source file. Disable to keep the board and the code independent.",
   "configuration.completionColumns.description": "Column names (or part of them, matched case-insensitively) that offer the 'remove linked TODO comments' nudge. Tasks in these columns are excluded from the labels usage count.",
   "configuration.progressionColumns.description": "Column names (or part of them, matched case-insensitively) whose tasks are considered Active / In Progress for the Insights 'In progress' metric.",
+  "configuration.visiblePanels.description": "Panels accessible from the top bar of the Lynvo board. Valid values: Board, Table, Activity, Conflicts, Insights, Labels, Identities.",
   "configuration.activityLog.description": "Log each activity type in the Activity history. Set a type to false to stop logging it. Untyped or missing entries stay logged by default.",
   "views.projectActions.name": "Project Actions"
 }

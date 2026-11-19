@@ -20,6 +20,7 @@
   "configuration.inCodeEditing.description": "Cuando está habilitado, editar el título, la descripción, la lista de tareas o las relaciones de una tarea vinculada al código también actualiza el comentario TODO en el archivo fuente vinculado. Desactiva para mantener el tablero y el código independientes.",
   "configuration.completionColumns.description": "Nombres de columna (o parte de ellos, sin distinguir mayúsculas de minúsculas) que muestran la sugerencia de eliminar los comentarios TODO vinculados. Las tareas de estas columnas no cuentan en el uso de las etiquetas.",
   "configuration.progressionColumns.description": "Nombres de columna (o parte de ellos, sin distinguir mayúsculas de minúsculas) cuyas tareas se consideran Activas / En progreso para la métrica 'En progreso' de las métricas.",
+  "configuration.visiblePanels.description": "Paneles accesibles desde la barra superior del tablero Lynvo. Valores válidos: Board, Table, Activity, Conflicts, Insights, Labels, Identities.",
   "configuration.activityLog.description": "Registra cada tipo de actividad en el historial de actividad. Pon un tipo en false para dejar de registrarlos. Los tipos ausentes siguen registrándose por defecto.",
   "views.projectActions.name": "Acciones del proyecto"
 }
