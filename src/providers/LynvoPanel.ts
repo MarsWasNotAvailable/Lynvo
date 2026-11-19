@@ -16,6 +16,7 @@ import {
   LynvoTask,
   LynvoTaskRelation,
   LynvoTaskRelationType,
+  LynvoTaskView,
 } from "../types";
 import {
   findMarkerLineIndex,
@@ -618,6 +619,7 @@ export class LynvoPanel {
         completionColumns: LynvoPanel.getCompletionColumns(),
         progressionColumns: LynvoPanel.getProgressionColumns(),
         inCodeEditingEnabled: isInCodeEditingEnabled(),
+        taskView: LynvoPanel.getTaskView(),
       });
     }
   }
@@ -637,6 +639,39 @@ export class LynvoPanel {
   private static async persistIdentity(id: string | undefined): Promise<void> {
     if (this._persistIdentity) {
       await this._persistIdentity(id);
+    }
+  }
+
+  /**
+   * The task card display view (collapsed | normal | full) — a per-user preference.
+   * Held in memory and persisted by the extension host into workspaceState so it
+   * survives reloads; echoed back to the webview in each `loadData` payload.
+   */
+  private static _taskView: LynvoTaskView = "normal";
+
+  private static _persistTaskView: ((view: LynvoTaskView) => Promise<void>) | undefined;
+
+  public static setTaskViewPersistence(
+    callback: (view: LynvoTaskView) => Promise<void>,
+  ): void {
+    this._persistTaskView = callback;
+  }
+
+  /** Seed the initial view from persisted state; an invalid value falls back to "normal". */
+  public static setInitialTaskView(view: LynvoTaskView | undefined): void {
+    if (view === "collapsed" || view === "normal" || view === "full") {
+      this._taskView = view;
+    }
+  }
+
+  public static getTaskView(): LynvoTaskView {
+    return this._taskView;
+  }
+
+  public static async setTaskView(view: LynvoTaskView): Promise<void> {
+    this._taskView = view;
+    if (this._persistTaskView) {
+      await this._persistTaskView(view);
     }
   }
 
@@ -792,11 +827,19 @@ export class LynvoPanel {
               completionColumns: LynvoPanel.getCompletionColumns(),
               progressionColumns: LynvoPanel.getProgressionColumns(),
               inCodeEditingEnabled: isInCodeEditingEnabled(),
+              taskView: LynvoPanel.getTaskView(),
               // Include the current bundle so that a (re)initialized webview
               // (e.g. after VS Code re-navigated it to its seed HTML)
               // renders in the active language, not the stale seed.
               bundle: getWebviewBundle(),
             });
+            return;
+          }
+          case "switchTaskView": {
+            const view = message.view;
+            if (view === "collapsed" || view === "normal" || view === "full") {
+              await LynvoPanel.setTaskView(view);
+            }
             return;
           }
           case "updateTaskStatus": {

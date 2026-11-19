@@ -82,6 +82,13 @@ export interface LynvoChecklistItem {
 
 export type LynvoTaskRelationType = "blocks" | "blocked-by" | "related" | "duplicates";
 
+/**
+ * How a task card is rendered in the Board/Table view:
+ * `collapsed` (densest, key properties only), `normal` (standard), or `full` (everything, untruncated).
+ * A per-user display preference, persisted in the extension's workspace state.
+ */
+export type LynvoTaskView = "collapsed" | "normal" | "full";
+
 export interface LynvoTaskRelation {
   id: string;
   type: LynvoTaskRelationType;

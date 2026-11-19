@@ -6,7 +6,7 @@ import { DataManager } from "./providers/DataManager";
 import { LynvoMenuProvider } from "./providers/LynvoMenuProvider";
 import { GitService } from "./providers/GitService";
 import { SkillInstaller } from "./providers/SkillInstaller";
-import { CodeReference, LynvoIdentity } from "./types";
+import { CodeReference, LynvoIdentity, LynvoTaskView } from "./types";
 import {
   buildPromotedComment,
   formatAssigneeRef,
@@ -390,6 +390,13 @@ export function activate(context: vscode.ExtensionContext) {
   DataManager.setActiveIdentityId(context.workspaceState.get<string>("lynvo.activeIdentityId"));
   LynvoPanel.setIdentityPersistence(async (id) => {
     await context.workspaceState.update("lynvo.activeIdentityId", id);
+  });
+
+  // Restore the per-user task card display view (collapsed | normal | full)
+  // and wire up its persistence to the workspace state.
+  LynvoPanel.setInitialTaskView(context.workspaceState.get<LynvoTaskView>("lynvo.taskView"));
+  LynvoPanel.setTaskViewPersistence(async (view) => {
+    await context.workspaceState.update("lynvo.taskView", view);
   });
 
   let refreshTimer: NodeJS.Timeout | undefined;

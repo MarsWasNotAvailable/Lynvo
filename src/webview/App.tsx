@@ -11,12 +11,14 @@ import {
   LynvoLabel,
   LynvoTask,
   LynvoTaskRelationType,
+  LynvoTaskView,
 } from "../types";
 import { fullRelationsForTask, hasRelationBetween } from "../relationModel";
 
 type WebviewOutboundMessage =
   | { command: "requestData" }
   | { command: "syncBoard" }
+  | { command: "switchTaskView"; view: LynvoTaskView }
   | { command: "updateTaskStatus"; taskId: string; newStatus: string }
   | {
       command: "reorderTasks";
@@ -272,6 +274,25 @@ const BroomIcon = () => (
   </svg>
 );
 
+// Eye glyph for the "switch task view" (collapsed / normal / full) action.
+const EyeIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M2 12 C 2 12 6 5 12 5 C 18 5 22 12 22 12 C 22 12 18 19 12 19 C 6 19 2 12 2 12 Z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
 // "Add column" glyph: a plus inside a square open at the top (like a U).
 const AddColumnIcon = () => (
   <svg
@@ -374,7 +395,7 @@ const clampMapZoom = (value: number): number =>
 type CodeLinkState = "synced" | "diverged" | "broken";
 
 type WebviewInboundMessage =
-  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; activeIdentityId?: string; completionColumns?: string[]; progressionColumns?: string[]; inCodeEditingEnabled?: boolean; bundle?: l10nJsonFormat }
+  | { command: "loadData"; data: LynvoBoard | null; remotePending?: boolean; codeLinkStates?: Record<string, CodeLinkState>; activeIdentityId?: string; completionColumns?: string[]; progressionColumns?: string[]; inCodeEditingEnabled?: boolean; taskView?: LynvoTaskView; bundle?: l10nJsonFormat }
   | { command: "setCodeLinkStates"; states: Record<string, CodeLinkState> }
   | { command: "setRemotePending"; pending: boolean }
   | { command: "switchView"; view: LynvoView }
@@ -385,6 +406,9 @@ type WebviewInboundMessage =
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
+const isLynvoTaskView = (value: unknown): value is LynvoTaskView =>
+  value === "collapsed" || value === "normal" || value === "full";
+
 const isLynvoView = (value: unknown): value is LynvoView =>
   value === "board" ||
   value === "table" ||
@@ -393,6 +417,10 @@ const isLynvoView = (value: unknown): value is LynvoView =>
   value === "insights" ||
   value === "labels" ||
   value === "identities";
+
+/** Cuts a string off after the `max`th character, adding an ellipsis to imply it is longer. */
+const truncateText = (value: string, max: number): string =>
+  value.length > max ? `${value.slice(0, max)}…` : value;
 
 const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
   if (!isRecord(value)) {return null;}
@@ -412,6 +440,7 @@ const parseInboundMessage = (value: unknown): WebviewInboundMessage | null => {
         ? (value.progressionColumns as unknown[]).filter((entry): entry is string => typeof entry === "string")
         : undefined,
       inCodeEditingEnabled: typeof value.inCodeEditingEnabled === "boolean" ? value.inCodeEditingEnabled : undefined,
+      taskView: isLynvoTaskView(value.taskView) ? value.taskView : undefined,
       bundle: isRecord(value.bundle) ? (value.bundle as l10nJsonFormat) : undefined,
     };
   }
@@ -1212,6 +1241,9 @@ export const App: React.FC = () => {
   // Whether board -> code propagation is on (lynvo.enableInCodeEditing setting).
   // When off, a code-linked task keeps its own data on both sides (link-only).
   const [inCodeEditingEnabled, setInCodeEditingEnabled] = useState(true);
+  // How task cards are rendered (collapsed | normal | full). A per-user display
+  // preference persisted by the host into workspaceState and echoed back on load.
+  const [taskView, setTaskView] = useState<LynvoTaskView>("normal");
   const [newIdentityName, setNewIdentityName] = useState("");
   const [newIdentityDomain, setNewIdentityDomain] = useState("local");
   // Whether the newly-created identity should become the active one right away.
@@ -1382,6 +1414,9 @@ export const App: React.FC = () => {
         }
         if (message.inCodeEditingEnabled !== undefined) {
           setInCodeEditingEnabled(message.inCodeEditingEnabled);
+        }
+        if (message.taskView) {
+          setTaskView(message.taskView);
         }
         // A (re)initialized webview applies the host's active-language bundle
         // before its first render, so that it never shows a stale seed language.
@@ -1792,6 +1827,16 @@ export const App: React.FC = () => {
     draggedTaskRef.current = null;
     draggedFromColumnRef.current = null;
     dragOverTaskRef.current = null;
+  };
+
+  // Cycle the task card display (normal -> collapsed -> full -> normal).
+  // The new view is applied locally right away and persisted by the host
+  // into workspaceState so it survives a reload.
+  const cycleTaskView = () => {
+    const order: LynvoTaskView[] = ["collapsed", "normal", "full"];
+    const next = order[(order.indexOf(taskView) + 1) % order.length];
+    setTaskView(next);
+    vscode.postMessage({ command: "switchTaskView", view: next });
   };
 
   const openAddTaskForm = (colId: string) => {
@@ -2284,6 +2329,16 @@ export const App: React.FC = () => {
     const dueDate = task.dueDate;
     const isOverdue = Boolean(dueDate && dueDate < Date.now());
     const checklistProgress = getChecklistProgress(task);
+    // Resolve an identity id to its "displayName@sourceId" label, or the id if it is dangling.
+    // The label is truncated (21 chars + ellipsis) so that long names do not overflow the card.
+    // The raw id would always be 20 chars, so below 21, no need to truncate it.
+    const identityName = (id?: string, max?: number): string | undefined => {
+      if (!id) {return undefined;}
+      const identity = boardData?.identities?.[id];
+      return identity
+        ? truncateText(`${identity.displayName}@${identity.sourceId}`, max ?? 21)
+        : `† ${id}`;
+    };
     // List as targetable tasks only the ones that are not already
     // linked to this one in either direction (own or derived, schema 3.0.0),
     // and that are not already staged as a draft relation in this form.
@@ -2662,7 +2717,7 @@ export const App: React.FC = () => {
               </div>
             )}
 
-            {task.codeReference && (
+            {taskView !== "collapsed" && task.codeReference && (
               <div
                 style={{
                   display: "flex",
@@ -2725,20 +2780,22 @@ export const App: React.FC = () => {
                 )}
               </div>
             )}
-            <div
-              style={{
-                fontSize: "12px",
-                opacity: 0.85,
-                margin: "0 0 10px 0",
-                color: "var(--vscode-descriptionForeground)",
-                display: "flex",
-                flexDirection: "column",
-                gap: "2px",
-              }}
-            >
-              {renderRichText(task.description)}
-            </div>
-            {checklistProgress.total > 0 && (
+            {taskView !== "collapsed" && (
+              <div
+                style={{
+                  fontSize: "12px",
+                  opacity: 0.85,
+                  margin: "0 0 10px 0",
+                  color: "var(--vscode-descriptionForeground)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "2px",
+                }}
+              >
+                {renderRichText(task.description)}
+              </div>
+            )}
+            {taskView !== "collapsed" && checklistProgress.total > 0 && (
               <div style={{ marginBottom: "10px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "var(--vscode-descriptionForeground)", marginBottom: "4px" }}>
                   <span>{t("Checklist")}</span>
@@ -2755,7 +2812,7 @@ export const App: React.FC = () => {
                     }}
                   />
                 </div>
-                {(task.checklist || []).slice(0, 3).map((item) => (
+                {(task.checklist || []).slice(0, taskView === "full" ? (task.checklist || []).length : 3).map((item) => (
                   <div
                     key={item.id}
                     style={{
@@ -2787,16 +2844,16 @@ export const App: React.FC = () => {
                     </span>
                   </div>
                 ))}
-                {(task.checklist || []).length > 3 && (
+                {taskView !== "full" && (task.checklist || []).length > 3 && (
                   <div style={{ fontSize: "10px", color: "var(--vscode-descriptionForeground)" }}>
                     +{t("{0} more", (task.checklist || []).length - 3)}
                   </div>
                 )}
               </div>
             )}
-            {boardData && fullRelationsForTask(boardData, task.id).length > 0 && (
+            {taskView !== "collapsed" && boardData && fullRelationsForTask(boardData, task.id).length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "10px" }}>
-                {fullRelationsForTask(boardData, task.id).slice(0, 3).map((relation) => {
+                {fullRelationsForTask(boardData, task.id).slice(0, taskView === "full" ? fullRelationsForTask(boardData, task.id).length : 3).map((relation) => {
                   const target = boardData?.tasks[relation.targetTaskId];
                   return (
                     <div
@@ -2821,30 +2878,59 @@ export const App: React.FC = () => {
                 })}
               </div>
             )}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: "10px",
-                opacity: 0.75,
-                color: "var(--vscode-textLink-foreground)",
-              }}
-            >
-              <span>
-                {task.assigneeId
-                  ? (() => {
-                      const assignee = boardData?.identities?.[task.assigneeId];
-                      return assignee
-                        ? `${assignee.displayName}@${assignee.sourceId}`
-                        : task.assigneeId;
-                    })()
-                  : t("Unassigned")}
-              </span>
-              <div style={{ textAlign: "right", color: "var(--vscode-descriptionForeground)" }}>
-                <div>{formatDateTime(task.createdAt)}</div>
-                {isEdited && <div>✎ {formatDateTime(task.updatedAt)}</div>}
+            {taskView === "full" ? (
+              // Full view lists every identity/date field on its own headed line
+              // (Assignee + Due, Created by, Last modified by) so that the several
+              // "identity + date" rows do not get confused with each other.
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "11px" }}>
+                <div>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--vscode-descriptionForeground)", marginBottom: "2px" }}>{t("Assignee")}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
+                    <span>{identityName(task.assigneeId, 39) || t("Unassigned")}</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--vscode-descriptionForeground)", marginBottom: "2px" }}>{t("Created by")}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
+                    <span>{identityName(task.createdBy) || t("Anonymous")}</span>
+                    <span style={{ color: "var(--vscode-descriptionForeground)", whiteSpace: "nowrap" }}>{formatDateTime(task.createdAt)}</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--vscode-descriptionForeground)", marginBottom: "2px" }}>{t("Last modified by")}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
+                    <span>{identityName(task.lastModifiedBy) || t("Anonymous")}</span>
+                    <span style={{ color: "var(--vscode-descriptionForeground)", whiteSpace: "nowrap" }}>{formatDateTime(task.updatedAt)}</span>
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "10px",
+                  opacity: 0.75,
+                  color: "var(--vscode-textLink-foreground)",
+                }}
+              >
+                <span>
+                  {task.assigneeId
+                    ? identityName(task.assigneeId)
+                    : t("Unassigned")}
+                </span>
+                <div style={{ textAlign: "right", color: "var(--vscode-descriptionForeground)" }}>
+                  {taskView === "collapsed" ? (
+                    dueDate ? <div>{new Date(dueDate).toLocaleDateString()}</div> : null
+                  ) : (
+                    <>
+                      <div>{formatDateTime(task.createdAt)}</div>
+                      {isEdited && <div>✎ {formatDateTime(task.updatedAt)}</div>}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -3759,6 +3845,9 @@ export const App: React.FC = () => {
             const isEditing = editingIdentityId === identity.id;
             const isSkillsOpen = skillsEditorIdentityId === identity.id;
             const skillCount = identity.skills?.length || 0;
+            // The name is truncated so that it does not overflow towards the next column;
+            // the full name stays on hover, and the Clipboard button copies it in full.
+            const nameDisplay = truncateText(identity.displayName, 16);
             return (
               <React.Fragment key={identity.id}>
               <div
@@ -3781,7 +3870,7 @@ export const App: React.FC = () => {
                       aria-label={t("Display name")}
                     />
                   ) : (
-                    <span style={{ fontWeight: 700, fontSize: "13px" }}>{identity.displayName}</span>
+                    <span style={{ fontWeight: 700, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={identity.displayName}>{nameDisplay}</span>
                   )}
                 </div>
 
@@ -5000,6 +5089,7 @@ export const App: React.FC = () => {
 	                    <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
                       <button type="button" className="icon-btn" onClick={() => openAddTaskForm(col.id)} title={t("Add task")} aria-label={t("Add task")} style={iconButtonStyle}><PlusIcon /></button>
                       <button type="button" className="icon-btn" onClick={() => vscode.postMessage({ command: "clearColumnTasks", colId: col.id })} title={t("Remove all tasks")} aria-label={t("Remove all tasks")} style={iconButtonStyle}><BroomIcon /></button>
+                      <button type="button" className="icon-btn" onClick={cycleTaskView} title={t("Switch task view (currently {0})", taskView === "collapsed" ? t("Collapsed view") : taskView === "full" ? t("Full view") : t("Normal view"))} aria-label={t("Switch task view")} style={iconButtonStyle}><EyeIcon /></button>
                       <span aria-hidden="true" style={{ width: "1px", height: "18px", margin: "0 3px", backgroundColor: "var(--lynvo-border, var(--vscode-panel-border, #3a3a3a))" }} />
                       <button className="icon-btn" onClick={() => startEditingColumn(col)} title={t("Edit")} aria-label={t("Edit")} style={iconButtonStyle}><EditIcon /></button>
                       <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteColumn", colId: col.id })} title={t("Delete")} aria-label={t("Delete")} style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
