@@ -18,6 +18,7 @@ import {
 } from "../types";
 import type { LynvoView } from "../types";
 import { fullRelationsForTask, hasRelationBetween } from "../relationModel";
+import { renderToStaticMarkup } from "react-dom/server";
 
 type WebviewOutboundMessage =
   | { command: "requestData" }
@@ -88,6 +89,9 @@ type WebviewOutboundMessage =
   | { command: "convertBrokenTask"; taskId: string }
   | { command: "removeCodeRefsForColumn"; colId: string }
   | { command: "assignTask"; taskId: string; identityId?: string }
+  | { command: "setTaskDueDate"; taskId: string; dueDate?: number }
+  | { command: "clearDayTasks"; day: number }
+  | { command: "clearDayDueDates"; day: number }
   | { command: "addIdentity"; displayName: string; sourceId: string; setActive?: boolean }
   | { command: "copyIdentity"; identityId: string; displayName: string; sourceId: string }
   | { command: "addLocalDomain"; name: string }
@@ -294,6 +298,81 @@ const EyeIcon = () => (
   >
     <path d="M2 12 C 2 12 6 5 12 5 C 18 5 22 12 22 12 C 22 12 18 19 12 19 C 6 19 2 12 2 12 Z" />
     <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+// Play (right-pointing triangle) glyph: implies ongoing state within the workflow.
+const PlayIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <polygon points="7 4 20 12 7 20 7 4" />
+  </svg>
+);
+
+// Tick glyph : implies complete state within the workflow.
+const TickIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+// Last-track glyph: implies starting-point state within the workflow.
+const LastTrackIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <line x1="5" y1="5" x2="5" y2="19" />
+    <polygon points="19 5 19 19 7 12 19 5" />
+  </svg>
+);
+
+// Tray glyph: an open-top container; the Tray cell hosts tasks without a due date.
+const TrayIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="grey"
+    strokeWidth="1"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="m 1,14 c 2,-1 5,-1 8,0 0,3 6,3 6,0 2,-1 6,-1 8,0" />
+    <path d="m 1,14 c -0.5,4 -0.25,6 0,8 6,0.5 10,1 22,0 0.25,-1 0.5,-4 0,-8" />
+    <path d="M 1,14 C 2,10 4,8 7.5,2 c 8,0 8,0 10.5,0 2,4 5,8 5,12" />
   </svg>
 );
 
@@ -515,6 +594,25 @@ const fromDateInputValue = (value: string): number | undefined => {
   const ts = new Date(`${value}T23:59:59`).getTime();
   return Number.isFinite(ts) ? ts : undefined;
 };
+
+/** Local midnight of a timestamp (groups tasks by day on the Calendar panel). */
+const startOfDayLocal = (ts: number): number => {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
+/** Whether two timestamps fall on the same local day. */
+const isSameLocalDay = (a?: number, b?: number): boolean =>
+  Boolean(a && b && startOfDayLocal(a) === startOfDayLocal(b));
+
+/** Sentinel "column" id used while the Create Task form is open from
+ * the Calendar panel (the form is then not attached to a board column). */
+const CALENDAR_CREATE_SENTINEL = "lynvo-calendar";
+
+// The index of the Tray Cell (storing "tasks with no due date") is Cell #0.
+// Any real day is a non-zero local-midnight timestamp.
+const TRAY_CELL_DAY = 0;
 
 const getTaskPriority = (task: LynvoTask): Priority => task.priority || "medium";
 
@@ -1324,6 +1422,14 @@ export const App: React.FC = () => {
   const [newTaskDueDate, setNewTaskDueDate] = useState("");
   const [newTaskError, setNewTaskError] = useState("");
 
+  // Calendar panel: the month displayed in the picker (1 = January)
+  // and the selected day cell (local midnight timestamp). Both default to today.
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth() + 1);
+  const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
+  const [selectedDay, setSelectedDay] = useState<number>(() => startOfDayLocal(Date.now()));
+  // Status (column) filter for the Calendar task list; "" = all statuses.
+  const [calendarStatusFilter, setCalendarStatusFilter] = useState<string>("");
+
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
@@ -1568,6 +1674,32 @@ export const App: React.FC = () => {
 
   const tasks = useMemo(() => Object.values(boardData?.tasks || {}), [boardData]);
 
+  // How many tasks are due on each local day (Calendar panel day-cell indicators).
+  const tasksByDay = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const task of Object.values(boardData?.tasks || {})) {
+      if (typeof task.dueDate !== "number") {continue;}
+      const key = startOfDayLocal(task.dueDate);
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+    return map;
+  }, [boardData]);
+
+  // Month options for the Calendar picker: the current month plus a year in each direction.
+  const monthOptions = useMemo(() => {
+    const now = new Date();
+    const options: { year: number; month: number; label: string }[] = [];
+    for (let offset = -12; offset <= 12; offset++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+      options.push({
+        year: d.getFullYear(),
+        month: d.getMonth() + 1,
+        label: d.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+      });
+    }
+    return options;
+  }, []);
+
   // Whether a column title matches the completionColumns setting (case-insensitive "includes");
   // those columns offer the "remove linked TODO comments" nudge, and their tasks are
   // excluded from the labels panel usage count.
@@ -1587,6 +1719,29 @@ export const App: React.FC = () => {
       const needle = term.toLowerCase();
       return needle.length > 0 && lower.includes(needle);
     });
+  };
+
+  // Classify a task's current column into one of the three workflow states
+  // (Backlog = neither, Progress = progressionColumns, Complete = completionColumns).
+  const taskWorkflowState = (task: LynvoTask): "backlog" | "progress" | "complete" => {
+    const col = boardData?.columns[task.status];
+    if (!col) {return "backlog";}
+    if (isCompletionColumn(col.title)) {return "complete";}
+    if (isProgressColumn(col.title)) {return "progress";}
+    return "backlog";
+  };
+
+  // First column (by position) that belongs to a given workflow state,
+  // or undefined when no such column exists (the move button is then disabled).
+  const firstColumnInState = (state: "backlog" | "progress" | "complete"): LynvoColumn | undefined => {
+    for (const col of sortedColumns) {
+      const complete = isCompletionColumn(col.title);
+      const progress = isProgressColumn(col.title);
+      if (state === "backlog" && !complete && !progress) {return col;}
+      if (state === "progress" && progress) {return col;}
+      if (state === "complete" && complete) {return col;}
+    }
+    return undefined;
   };
 
   // How many tasks reference each label (by id);
@@ -1772,7 +1927,7 @@ export const App: React.FC = () => {
   };
 
   const handleDragStart = (e: React.DragEvent, task: LynvoTask) => {
-    if (editingTaskId === task.id || isFiltering) {
+    if (editingTaskId === task.id) {
       e.preventDefault();
       return;
     }
@@ -1793,7 +1948,7 @@ export const App: React.FC = () => {
 
   const handleDrop = (e: React.DragEvent, newStatus: string) => {
     e.preventDefault();
-    if (isFiltering || !boardData) {return;}
+    if (!boardData) {return;}
 
     const taskId = draggedTaskRef.current;
     const sourceStatus = draggedFromColumnRef.current;
@@ -1864,24 +2019,32 @@ export const App: React.FC = () => {
     vscode.postMessage({ command: "switchTaskView", view: next });
   };
 
-  const openAddTaskForm = (colId: string) => {
+  const openAddTaskForm = (colId: string, dueDate?: number) => {
     setAddingTaskColId(colId);
     setNewTaskTitle("");
     setNewTaskDesc("");
     setNewTaskLabels([]);
     setNewTaskPriority("medium");
-    setNewTaskDueDate("");
+    setNewTaskDueDate(toDateInputValue(dueDate));
     setNewTaskError("");
   };
 
   const submitNewTask = () => {
     if (!newTaskTitle.trim() || !addingTaskColId) {return;}
 
+    // Tasks created from the Calendar panel have no column of their own:
+    // land them in the first column that is neither a completion nor a
+    // progression column (the "backlog"); fall back to the host's default.
+    let targetColId = addingTaskColId;
+    if (addingTaskColId === CALENDAR_CREATE_SENTINEL) {
+      targetColId = firstColumnInState("backlog")?.id || "";
+    }
+
     vscode.postMessage({
       command: "createTask",
       title: newTaskTitle.trim(),
       description: newTaskDesc,
-      targetColId: addingTaskColId,
+      targetColId,
       labelIds: newTaskLabels,
       priority: newTaskPriority,
       dueDate: fromDateInputValue(newTaskDueDate),
@@ -1889,6 +2052,32 @@ export const App: React.FC = () => {
     // Do NOT close the Task Creation here: wait for the createTaskResult message
     // so that a duplicate title keeps the form (and the user's draft) open.
   };
+
+  // Shared Create Task form, used at :
+  // - the bottom of a Board column
+  // - in the Calendar panel's tasks list
+  const renderAddTaskForm = () => (
+    <div ref={addTaskFormRef} style={{ marginTop: "15px", padding: "10px", backgroundColor: "var(--vscode-editor-background)", borderRadius: "6px", border: "1px solid var(--vscode-focusBorder)" }}>
+      <input autoFocus placeholder={t("Task title...")} value={newTaskTitle} onChange={(e) => { setNewTaskTitle(e.target.value); if (newTaskError) { setNewTaskError(""); } }} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
+      {newTaskError && (
+        <div style={{ color: "var(--vscode-inputValidation-errorForeground, #f48771)", fontSize: "11px", marginBottom: "8px" }}>{newTaskError}</div>
+      )}
+      <textarea placeholder={t("Write a description of the task here")} value={newTaskDesc} onChange={(e) => setNewTaskDesc(e.target.value)} rows={2} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
+      <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
+        <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value as Priority)} style={{ flex: 1, padding: "6px" }}>
+          <option value="low">{t("Low Priority")}</option>
+          <option value="medium">{t("Medium Priority")}</option>
+          <option value="high">{t("High Priority")}</option>
+        </select>
+        <input type="date" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} style={{ flex: 1, padding: "6px" }} />
+      </div>
+      {renderLabelSelector(newTaskLabels, setNewTaskLabels)}
+      <div style={{ display: "flex", gap: "5px" }}>
+        <button onClick={() => setAddingTaskColId(null)} style={{ flex: 1 }}>{t("Cancel")}</button>
+        <button onClick={submitNewTask} style={{ flex: 1, backgroundColor: "var(--vscode-button-background)", color: "white", border: "none" }}>{t("Save")}</button>
+      </div>
+    </div>
+  );
 
   const startEditingTask = (task: LynvoTask) => {
     // A promoted task whose link is broken (file or marker gone)
@@ -2267,10 +2456,6 @@ export const App: React.FC = () => {
 
   // --- Column drag-and-drop (drag handle is the column header) ---
   const handleColumnDragStart = (e: React.DragEvent, colId: string) => {
-    if (isFiltering) {
-      e.preventDefault();
-      return;
-    }
     draggedColumnRef.current = colId;
     e.dataTransfer.setData("text/plain", `lynvo-column:${colId}`);
     e.dataTransfer.effectAllowed = "move";
@@ -2379,7 +2564,7 @@ export const App: React.FC = () => {
       <div
         className="lynvo-card"
         key={task.id}
-        draggable={!isEditing && !isFiltering}
+        draggable={!isEditing}
         onDragStart={(e) => handleDragStart(e, task)}
         onDragEnter={(e) => {
           e.stopPropagation();
@@ -2607,18 +2792,48 @@ export const App: React.FC = () => {
           </div>
         ) : (
           <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <h4
-                style={{
-                  margin: "0 0 8px 0",
-                  fontSize: "14px",
-                  paddingRight: "88px",
-                  color: "var(--vscode-editor-foreground)",
-                }}
-              >
-                {task.title}
-              </h4>
-              <div style={{ position: "absolute", top: "8px", right: "8px", display: "flex", gap: "2px", alignItems: "center" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px", paddingBottom: "6px", borderBottom: "1px solid var(--lynvo-border, var(--vscode-panel-border, #3a3a3a))" }}>
+              <div style={{ display: "flex", gap: "2px", alignItems: "center" }}>
+                {(() => {
+                  // Workflow move buttons: two 2-state buttons that step the task
+                  // between Backlog / In-Progress / Complete (first matching column).
+                  const state = taskWorkflowState(task);
+                  const firstBacklog = firstColumnInState("backlog");
+                  const firstComplete = firstColumnInState("complete");
+                  const firstProgress = firstColumnInState("progress");
+                  const defs =
+                    state === "backlog"
+                      ? [
+                          { key: "to-progress", icon: <PlayIcon />, target: firstProgress?.id, title: t("Move to{0}", ` ${firstProgress?.title || ""}`) },
+                          { key: "to-complete", icon: <TickIcon />, target: firstComplete?.id, title: t("Move to{0}", ` ${firstComplete?.title || ""}`) },
+                        ]
+                      : state === "progress"
+                        ? [
+                            { key: "to-backlog", icon: <LastTrackIcon />, target: firstBacklog?.id, title: t("Move to{0}", ` ${firstBacklog?.title || ""}`) },
+                            { key: "to-complete", icon: <TickIcon />, target: firstComplete?.id, title: t("Move to{0}", ` ${firstComplete?.title || ""}`) },
+                          ]
+                        : [
+                            { key: "to-backlog", icon: <LastTrackIcon />, target: firstBacklog?.id, title: t("Move to{0}", ` ${firstBacklog?.title || ""}`) },
+                            { key: "to-progress", icon: <PlayIcon />, target: firstProgress?.id, title: t("Move to{0}", ` ${firstProgress?.title || ""}`) },
+                          ];
+                  return defs.map((def) => (
+                    <button
+                      key={def.key}
+                      type="button"
+                      className="icon-btn"
+                      style={{ ...iconButtonStyle, opacity: def.target ? 1 : 0.4 }}
+                      disabled={!def.target}
+                      onClick={() => def.target && vscode.postMessage({ command: "updateTaskStatus", taskId: task.id, newStatus: def.target })}
+                      title={def.target ? def.title : t("No column for this status")}
+                      aria-label={def.title}
+                    >
+                      {def.icon}
+                    </button>
+                  ));
+                })()}
+              </div>
+              <div style={{ display: "flex", gap: "2px", alignItems: "center" }}>
+                <span aria-hidden="true" style={{ width: "1px", height: "18px", margin: "0 3px", backgroundColor: "var(--lynvo-border, var(--vscode-panel-border, #3a3a3a))" }} />
                 <button
                   type="button"
                   className="icon-btn"
@@ -2661,10 +2876,20 @@ export const App: React.FC = () => {
                     <LinkIcon />
                   </button>
                 )}
-	                <button className="icon-btn" onClick={() => startEditingTask(task)} title={t("Edit")} aria-label={t("Edit")} style={iconButtonStyle}><EditIcon /></button>
+                <button className="icon-btn" onClick={() => startEditingTask(task)} title={t("Edit")} aria-label={t("Edit")} style={iconButtonStyle}><EditIcon /></button>
                 <button className="icon-btn delete" onClick={() => vscode.postMessage({ command: "deleteTask", taskId: task.id })} title={t("Delete")} aria-label={t("Delete")} style={{ ...iconButtonStyle, color: "var(--vscode-errorForeground)" }}><DeleteIcon /></button>
               </div>
             </div>
+
+            <h4
+              style={{
+                margin: "0 0 8px 0",
+                fontSize: "14px",
+                color: "var(--vscode-editor-foreground)",
+              }}
+            >
+              {task.title}
+            </h4>
 
             <div style={{ display: "flex", gap: "6px", marginBottom: "8px", flexWrap: "wrap" }}>
               <span
@@ -3211,6 +3436,293 @@ export const App: React.FC = () => {
     );
   };
 
+  // Calendar panel: a month grid (day numbers only) on the left,
+  // and a scrollable tasks list for the selected day on the right.
+  // Reuses renderTaskCard and the shared Create Task form.
+  const renderCalendarView = () => {
+    if (!boardData) {return null;}
+
+    const isTrayCell = selectedDay === TRAY_CELL_DAY;
+
+    // A day in the past hosts overdue tasks : a nudge below proposes to clear
+    // the past due dates so that the tasks move into the "no due date space" (Tray).
+    const isPastDay = !isTrayCell && selectedDay < startOfDayLocal(Date.now());
+
+    // Tasks shown in the right pane: those of the selected day,
+    // or the tasks with no due date when the Tray Cell is selected;
+    // optionally filtered by status (backlog vs progress vs complete).
+    // Built from filteredTasks so the search / labels / priorities filters apply here too.
+    const tasksOfTheDay = filteredTasks
+      .filter((task) =>
+        isTrayCell
+          ? typeof task.dueDate !== "number"
+          : typeof task.dueDate === "number" && isSameLocalDay(task.dueDate, selectedDay),
+      )
+      .filter((task) => calendarStatusFilter === "" || task.status === calendarStatusFilter)
+      .sort((a, b) => (a.position ?? a.createdAt) - (b.position ?? b.createdAt));
+
+    // Filtered per-day counts: the day-cell indicators reflect the active filters,
+    // not the absolute task counts.
+    const filteredByDay = new Map<number, number>();
+    for (const task of filteredTasks) {
+      if (typeof task.dueDate !== "number") {continue;}
+      const key = startOfDayLocal(task.dueDate);
+      filteredByDay.set(key, (filteredByDay.get(key) || 0) + 1);
+    }
+
+    // Fixed 7-column grid, containing :
+    // - The tray cell at index 0,
+    // - then 1..N days of the month, 
+    // - then the first days of the next month (fill the remaining cells, dimmed).
+    // 34 total cells cover every month (28-31 days), so all days stay reachable.
+    const daysInMonth = new Date(calendarYear, calendarMonth, 0).getDate();
+    const totalCells = 34;
+    const cells = [
+      {
+          day: TRAY_CELL_DAY,
+          ts: 0,
+          inMonth: false,
+      },
+      ...Array.from({ length: totalCells }, (_, i) => {
+        const d = new Date(calendarYear, calendarMonth - 1, 1 + i);
+        return {
+          day: d.getDate(),
+          ts: startOfDayLocal(d.getTime()),
+          inMonth: i < daysInMonth,
+        };
+      })
+    ];
+
+    // How many (filtered) tasks have no due date (for countBadge indicator on the Tray cell).
+    const noDueDateCount = filteredTasks.filter((task) => typeof task.dueDate !== "number").length;
+
+    const monthValue = `${calendarYear}-${calendarMonth}`;
+    const onMonthChange = (value: string) => {
+      const [year, month] = value.split("-").map(Number);
+      if (Number.isFinite(year) && Number.isFinite(month)) {
+        setCalendarYear(year);
+        setCalendarMonth(month);
+      }
+    };
+
+    const tasksListHeaderLabel = isTrayCell
+      ? t("No due date")
+      : new Date(selectedDay).toLocaleDateString(undefined, {
+          weekday: "long",
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        });
+
+    // The edit / create forms temporarily replace the whole task list.
+    const editingTask = editingTaskId ? boardData.tasks[editingTaskId] : undefined;
+    const creatingInCalendar = addingTaskColId === CALENDAR_CREATE_SENTINEL;
+
+    // Shared count badge (circle) used by the day cells and the Tray cell.
+    const countBadge = (count: number) => (
+      <span
+        style={{
+          minWidth: "18px",
+          height: "18px",
+          borderRadius: "50%",
+          backgroundColor: "var(--vscode-button-background)",
+          color: "var(--vscode-button-foreground, #fff)",
+          fontSize: "11px",
+          lineHeight: "18px",
+          textAlign: "center",
+          padding: "0 3px",
+        }}
+      >
+        {count > 99 ? "99+" : count}
+      </span>
+    );
+
+    // Drop a task card onto a day cell to change its due date (or clear it onto #0).
+    const dropTaskOnDay = (e: React.DragEvent, dueDate: number | undefined) => {
+      e.preventDefault();
+      const taskId = draggedTaskRef.current;
+      if (!taskId) {return;}
+      draggedTaskRef.current = null;
+      vscode.postMessage({ command: "setTaskDueDate", taskId, dueDate });
+    };
+
+    const cellBorder = (selected: boolean) =>
+      selected
+        ? "2px solid var(--vscode-focusBorder)"
+        : "1px solid var(--lynvo-border, var(--vscode-panel-border, #3a3a3a))";
+
+    return (
+      <div style={{ display: "flex", gap: "16px", height: "100%", minHeight: 0, alignItems: "stretch" }}>
+        <div style={{ flex: "7 1 0px", minWidth: "320px", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <select value={monthValue} onChange={(e) => onMonthChange(e.target.value)} style={{ padding: "6px" }}>
+            {monthOptions.map((option) => (
+              <option key={`${option.year}-${option.month}`} value={`${option.year}-${option.month}`}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+            <input className="lynvo-search" placeholder={t("Search tasks...")} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+            <select value={activeFilterLabel} onChange={(e) => setActiveFilterLabel(e.target.value)} style={{ padding: "6px" }}>
+              <option value="">{t("All labels")}</option>
+              {boardData?.labels &&
+                Object.values(boardData.labels).map((label) => (
+                  <option key={label.id} value={label.id}>
+                    {label.name}
+                  </option>
+                ))}
+            </select>
+            <select value={activePriorityFilter} onChange={(e) => setActivePriorityFilter(e.target.value)} style={{ padding: "6px" }}>
+              <option value="">{t("All priorities")}</option>
+              <option value="high">{t("High")}</option>
+              <option value="medium">{t("Medium")}</option>
+              <option value="low">{t("Low")}</option>
+            </select>
+            <select value={calendarStatusFilter} onChange={(e) => setCalendarStatusFilter(e.target.value)} style={{ padding: "6px" }}>
+              <option value="">{t("All statuses")}</option>
+              {sortedColumns.map((col) => (
+                <option key={col.id} value={col.id}>{col.title}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ flex: 1, minHeight: "120px", display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gridAutoRows: "1fr", gap: "6px" }}>
+            {/* The Tray cell at day cell #0: hosts every task without a due date. */}
+            <button
+              type="button"
+              onClick={() => setSelectedDay(TRAY_CELL_DAY)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => dropTaskOnDay(e, undefined)}
+              style={{
+                border: cellBorder(isTrayCell),
+                borderRadius: "6px",
+                padding: "4px",
+                minHeight: "40px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: isTrayCell ? 1 : 0.45,
+                cursor: "pointer",
+                background: `url("data:image/svg+xml,${encodeURIComponent(renderToStaticMarkup(<TrayIcon />))}")`,
+                backgroundRepeat: "no-repeat",
+                backgroundPosition: "center",
+                backgroundSize: "contain"
+              }}
+              title={t("No due date")}
+              aria-label={t("No due date")}
+            >
+              {noDueDateCount > 0 && countBadge(noDueDateCount)}
+            </button>
+            {cells.slice(1).map((cell) => {
+              const count = filteredByDay.get(cell.ts) || 0;
+              const isSelected = cell.ts === selectedDay;
+              return (
+                <button
+                  key={cell.ts}
+                  type="button"
+                  onClick={() => setSelectedDay(cell.ts)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => dropTaskOnDay(e, cell.ts)}
+                  style={{
+                    position: "relative",
+                    border: cellBorder(isSelected),
+                    borderRadius: "6px",
+                    padding: "4px",
+                    minHeight: "40px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: cell.inMonth ? 1 : 0.45,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ position: "absolute", top: "3px", right: "6px", fontSize: "12px" }}>{cell.day}</span>
+                  {count > 0 && countBadge(count)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div
+          style={{
+            flex: "3 1 0px",
+            minWidth: "240px",
+            display: "flex",
+            flexDirection: "column",
+            border: "1px solid var(--lynvo-border, var(--vscode-panel-border, #3a3a3a))",
+            borderRadius: "8px",
+            minHeight: 0,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "10px",
+              borderBottom: "1px solid var(--lynvo-border, var(--vscode-panel-border, #3a3a3a))",
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: "14px", flex: 1, minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tasksListHeaderLabel}</h3>
+            <div style={{ display: "flex", gap: "5px", alignItems: "center", flexShrink: 0 }}>
+              {/* When opening the Add Task Form : 
+                * We use the sentinel "column" to mark that the form is not attached to a board column.
+                * And we prefill the due date with the currently selected day - main feature of the Calendar panel.
+                */}
+              <button type="button" className="icon-btn" onClick={() => openAddTaskForm(CALENDAR_CREATE_SENTINEL, selectedDay)} title={t("Add task")} aria-label={t("Add task")} style={iconButtonStyle}><PlusIcon /></button>
+              <button type="button" className="icon-btn" onClick={() => vscode.postMessage({ command: "clearDayTasks", day: selectedDay })} title={t("Remove all tasks")} aria-label={t("Remove all tasks")} style={iconButtonStyle}><BroomIcon /></button>
+              <button type="button" className="icon-btn" onClick={cycleTaskView} title={t("Switch task view (currently {0})", taskView === "collapsed" ? t("Collapsed view") : taskView === "full" ? t("Full view") : t("Normal view"))} aria-label={t("Switch task view")} style={iconButtonStyle}><EyeIcon /></button>
+            </div>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px" }}>
+            {editingTask ? (
+              renderTaskCard(editingTask)
+            ) : creatingInCalendar ? (
+              renderAddTaskForm()
+            ) : tasksOfTheDay.length === 0 ? (
+              <div style={{ opacity: 0.6, padding: "10px" }}>
+                { t("No tasks for this day under the specified filters.") }
+              </div>
+            ) : (
+              <>
+                {isPastDay && (
+                  <div
+                    style={{
+                      marginBottom: "10px",
+                      padding: "8px 10px",
+                      borderRadius: "6px",
+                      border: "1px dashed var(--vscode-charts-yellow)",
+                      background: "var(--vscode-inputValidation-warningBackground, transparent)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      flexWrap: "wrap",
+                      fontSize: "11px",
+                    }}
+                  >
+                    <span style={{ flex: 1, minWidth: "140px" }}>{t("These tasks are past due. Remove their due date to move them into the Tray.")}</span>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => vscode.postMessage({ command: "clearDayDueDates", day: selectedDay })}
+                      title={t("Remove due dates")}
+                      aria-label={t("Remove due dates")}
+                      style={iconButtonStyle}
+                    >
+                      <TrayIcon />
+                    </button>
+                  </div>
+                )}
+                {tasksOfTheDay.map(renderTaskCard)}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderIdentitiesManager = () => {
     if (!boardData) {return null;}
 
@@ -3269,7 +3781,7 @@ export const App: React.FC = () => {
         case "not":
           return skillFilterIds.every((skillId) => !skills.includes(skillId));
         default: //or
-          skillFilterIds.some((skillId) => skills.includes(skillId))
+          skillFilterIds.some((skillId) => skills.includes(skillId));
       }
     });
 
@@ -5033,7 +5545,6 @@ export const App: React.FC = () => {
               <option value="medium">{t("Medium")}</option>
               <option value="low">{t("Low")}</option>
             </select>
-            {isFiltering && <span style={{ fontSize: "10px", color: "var(--vscode-editorWarning-foreground)" }}>{t("Drag & Drop disabled")}</span>}
           </div>
           {currentView === "board" && (
             <button
@@ -5102,7 +5613,7 @@ export const App: React.FC = () => {
                     <button className="icon-btn" onClick={() => setEditingColId(null)}>X</button>
                   </div>
                 ) : (
-	                  <div className="lynvo-column-header" draggable={!isFiltering} style={{ cursor: "grab" }} onDragStart={(e) => { if ((e.target as HTMLElement).closest("button, input, select, a")) { e.preventDefault(); return; } handleColumnDragStart(e, col.id); }} onDragEnd={handleColumnDragEnd}>
+	                  <div className="lynvo-column-header" draggable style={{ cursor: "grab" }} onDragStart={(e) => { if ((e.target as HTMLElement).closest("button, input, select, a")) { e.preventDefault(); return; } handleColumnDragStart(e, col.id); }} onDragEnd={handleColumnDragEnd}>
 	                    <h3 className="lynvo-column-title">
 	                      <span>{col.title}</span>
 	                      <span className="lynvo-count">{columnTasks.length}</span>
@@ -5159,28 +5670,7 @@ export const App: React.FC = () => {
 
                 {columnTasks.map(renderTaskCard)}
 
-                {addingTaskColId === col.id && (
-                  <div ref={addTaskFormRef} style={{ marginTop: "15px", padding: "10px", backgroundColor: "var(--vscode-editor-background)", borderRadius: "6px", border: "1px solid var(--vscode-focusBorder)" }}>
-                    <input autoFocus placeholder={t("Task title...")} value={newTaskTitle} onChange={(e) => { setNewTaskTitle(e.target.value); if (newTaskError) { setNewTaskError(""); } }} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
-                    {newTaskError && (
-                      <div style={{ color: "var(--vscode-inputValidation-errorForeground, #f48771)", fontSize: "11px", marginBottom: "8px" }}>{newTaskError}</div>
-                    )}
-                    <textarea placeholder={t("Write a description of the task here")} value={newTaskDesc} onChange={(e) => setNewTaskDesc(e.target.value)} rows={2} style={{ width: "100%", marginBottom: "8px", padding: "5px", boxSizing: "border-box" }} />
-                    <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
-                      <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value as Priority)} style={{ flex: 1, padding: "6px" }}>
-                        <option value="low">{t("Low Priority")}</option>
-                        <option value="medium">{t("Medium Priority")}</option>
-                        <option value="high">{t("High Priority")}</option>
-                      </select>
-                      <input type="date" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} style={{ flex: 1, padding: "6px" }} />
-                    </div>
-                    {renderLabelSelector(newTaskLabels, setNewTaskLabels)}
-                    <div style={{ display: "flex", gap: "5px" }}>
-                      <button onClick={() => setAddingTaskColId(null)} style={{ flex: 1 }}>{t("Cancel")}</button>
-                      <button onClick={submitNewTask} style={{ flex: 1, backgroundColor: "var(--vscode-button-background)", color: "white", border: "none" }}>{t("Save")}</button>
-                    </div>
-                  </div>
-                )}
+                {addingTaskColId === col.id && renderAddTaskForm()}
               </div>
             );
           })}
@@ -5203,6 +5693,7 @@ export const App: React.FC = () => {
       )}
 
       {boardData && currentView === "table" && renderTableView()}
+      {boardData && currentView === "calendar" && renderCalendarView()}
       {boardData && currentView === "activity" && renderActivityView()}
       {boardData && currentView === "conflicts" && renderConflictsView()}
       {boardData && currentView === "insights" && renderInsights()}

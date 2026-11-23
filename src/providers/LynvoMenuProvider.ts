@@ -38,6 +38,12 @@ export class LynvoMenuProvider
       icon: "table",
     },
     {
+      label: "Open Calendar",
+      command: "lynvo.openCalendar",
+      tooltip: "Open the calendar view of the tasks",
+      icon: "calendar",
+    },
+    {
       label: "Open Activity",
       command: "lynvo.openActivity",
       tooltip: "Show the previous activities of the team",

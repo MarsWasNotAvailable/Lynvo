@@ -16,6 +16,7 @@ export const ALL_TRADE_SKILL = "lynvo:all-trade";
 export const LYNVO_PANELS = [
   { id: "board", name: "Board" },
   { id: "table", name: "Table" },
+  { id: "calendar", name: "Calendar" },
   { id: "activity", name: "Activity" },
   { id: "conflicts", name: "Conflicts" },
   { id: "insights", name: "Insights" },
@@ -157,7 +158,10 @@ export type LynvoActivityType =
   | "identity_renamed"
   | "identity_deleted"
   | "domain_created"
-  | "domain_deleted";
+  | "domain_deleted"
+  | "duedate_updated"
+  | "duedate_deleted"
+  ;
 
 export interface LynvoActivity {
   id: string;

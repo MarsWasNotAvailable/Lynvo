@@ -35,6 +35,7 @@
     "onView:lynvo.sidebarMenu",
     "onCommand:lynvo.openBoard",
     "onCommand:lynvo.openTable",
+    "onCommand:lynvo.openCalendar",
     "onCommand:lynvo.openActivity",
     "onCommand:lynvo.openConflicts",
     "onCommand:lynvo.openLabels",
@@ -76,6 +77,10 @@
       {
         "command": "lynvo.openTable",
         "title": "%command.openTable%"
+      },
+      {
+        "command": "lynvo.openCalendar",
+        "title": "%command.openCalendar%"
       },
       {
         "command": "lynvo.openActivity",
@@ -204,6 +209,7 @@
             "enum": [
               "Board",
               "Table",
+              "Calendar",
               "Activity",
               "Conflicts",
               "Insights",
@@ -213,6 +219,7 @@
           },
           "default": [
             "Board",
+            "Calendar",
             "Conflicts",
             "Insights",
             "Labels",
@@ -257,7 +264,9 @@
             "identity_renamed": true,
             "identity_deleted": true,
             "domain_created": true,
-            "domain_deleted": true
+            "domain_deleted": true,
+            "duedate_updated": true,
+            "duedate_deleted": true
           },
           "description": "%configuration.activityLog.description%"
         }

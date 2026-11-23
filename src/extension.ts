@@ -722,6 +722,12 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("lynvo.openCalendar", () => {
+      LynvoPanel.render(context.extensionUri, "calendar");
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("lynvo.openActivity", () => {
       LynvoPanel.render(context.extensionUri, "activity");
     }),

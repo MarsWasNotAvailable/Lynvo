@@ -1108,6 +1108,56 @@ export class DataManager {
     });
   }
 
+  /** Change a task's due date (used by Calendar panel day-cell drop). */
+  public static async updateTaskDueDate(
+    taskId: string,
+    dueDate: number,
+  ): Promise<void> {
+    await this.mutateBoard(async (board) => {
+      const task = board.tasks[taskId];
+      if (!task) {return;}
+      const instigator = await this.getSigningIdentity(board);
+      const previousDueDate = task.dueDate;
+      task.dueDate = dueDate;
+      task.updatedAt = Date.now();
+      if (instigator) {task.lastModifiedBy = instigator.id;}
+      const when = new Date(dueDate).toLocaleDateString();
+      const message = `{${task.title}} ::: ${when}`;
+      this.addActivity(
+        board,
+        "duedate_updated",
+        message,
+        instigator,
+        { taskId, metadata: { from: previousDueDate ?? null, to: dueDate ?? null } },
+      );
+    });
+  }
+
+  /** Clear a task's due date (used by Calendar panel day-cell drop). */
+  public static async deleteTaskDueDate(
+    taskId: string
+  ): Promise<void> {
+    await this.mutateBoard(async (board) => {
+      const task = board.tasks[taskId];
+      if (!task) {return;}
+      const instigator = await this.getSigningIdentity(board);
+      const previousDueDate = task.dueDate;
+      delete task.dueDate;
+      task.updatedAt = Date.now();
+      if (instigator) {task.lastModifiedBy = instigator.id;}
+      const message = `{${task.title}}`;
+      LynvoLog.log(message);
+      this.addActivity(
+        board,
+        "duedate_deleted",
+        message,
+        instigator,
+        { taskId, metadata: { from: previousDueDate ?? null, to: null } },
+      );
+      LynvoLog.log(message);
+    });
+  }
+
   public static async reorderTasks(
     updates: Array<{
       id: string;

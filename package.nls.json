@@ -5,6 +5,7 @@
   "command.openBoard": "Lynvo: Open Board",
   "command.openInsights": "Lynvo: Open Insights",
   "command.openTable": "Lynvo: Open Table",
+  "command.openCalendar": "Lynvo: Open Calendar",
   "command.openActivity": "Lynvo: Open Activity",
   "command.openConflicts": "Lynvo: Open Conflicts",
   "command.openLabels": "Lynvo: Manage Labels",

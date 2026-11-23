@@ -1530,6 +1530,125 @@ export class LynvoPanel {
             LynvoPanel.refreshDataAndScheduleSync();
             return;
           }
+          case "setTaskDueDate": {
+            const taskId = asString(message.taskId);
+            if (!taskId) { return; }
+            const dueDate = asNumber(message.dueDate);
+            if (dueDate === undefined) {
+              // Assuming dueDate is intentionally set as undefined,
+              // we go ahead with deleting the due date.
+              // It's only the Tray cell that calls `dropTaskOnDay`
+              // with an undefined value as "delete this" sentinel.
+              // If that change, we'll have to change the sentinel value.
+              await DataManager.deleteTaskDueDate(taskId);
+            }
+            else {
+              await DataManager.updateTaskDueDate(taskId, dueDate);
+            }
+            LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
+          case "clearDayTasks": {
+            const day = asNumber(message.day);
+            if (day === undefined) {
+              return;
+            }
+            const board = await DataManager.loadBoard();
+            if (!board) {
+              return;
+            }
+            // The Cell #0 is the Tray cell, that contains tasks with "no due date".
+            const isTrayCell = day === 0;
+            let tasksOnDay: LynvoTask[];
+            if (isTrayCell) {
+              tasksOnDay = Object.values(board.tasks).filter(
+                (task) => typeof task.dueDate !== "number",
+              );
+            } else {
+              const start = new Date(day);
+              start.setHours(0, 0, 0, 0);
+              const end = new Date(start.getTime());
+              end.setDate(end.getDate() + 1);
+              tasksOnDay = Object.values(board.tasks).filter(
+                (task) =>
+                  typeof task.dueDate === "number" &&
+                  task.dueDate >= start.getTime() &&
+                  task.dueDate < end.getTime(),
+              );
+            }
+            if (tasksOnDay.length === 0) {
+              vscode.window.showInformationMessage(
+                isTrayCell
+                  ? t("No task without a due date to remove.")
+                  : t("This day has no tasks to remove."),
+              );
+              return;
+            }
+            const removeLabel = t("Remove all tasks");
+            const confirmClear = await vscode.window.showWarningMessage(
+              isTrayCell
+                ? t("Remove all {0} task(s) without a due date?", tasksOnDay.length)
+                : t("Remove all {0} task(s) due on this day?", tasksOnDay.length),
+              { modal: true },
+              removeLabel,
+            );
+            if (confirmClear !== removeLabel) {
+              return;
+            }
+            for (const task of tasksOnDay) {
+              await deleteTaskWithCodeCleanup(task.id);
+            }
+            vscode.window.showInformationMessage(
+              isTrayCell
+                ? t("Removed {0} task(s) without a due date.", tasksOnDay.length)
+                : t("Removed {0} task(s) from the day.", tasksOnDay.length),
+            );
+            LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
+          case "clearDayDueDates": {
+            // Clear due dates of the tasks on the specified day.
+            // Used by the nudge from the Calendar, so that the
+            // past due tasks moves into the "no due date space" (Tray).
+            const day = asNumber(message.day);
+            if (day === undefined || day === 0) {
+              return;
+            }
+            const board = await DataManager.loadBoard();
+            if (!board) {
+              return;
+            }
+            const start = new Date(day);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(start.getTime());
+            end.setDate(end.getDate() + 1);
+            const tasksOnDay = Object.values(board.tasks).filter(
+              (task) =>
+                typeof task.dueDate === "number" &&
+                task.dueDate >= start.getTime() &&
+                task.dueDate < end.getTime(),
+            );
+            if (tasksOnDay.length === 0) {
+              return;
+            }
+            const removeLabel = t("Remove due dates");
+            const confirmed = await vscode.window.showWarningMessage(
+              t("Remove the due date of {0} task(s) on this day? They will move into the Tray (no due date).", tasksOnDay.length),
+              { modal: true },
+              removeLabel,
+            );
+            if (confirmed !== removeLabel) {
+              return;
+            }
+            for (const task of tasksOnDay) {
+              await DataManager.deleteTaskDueDate(task.id);
+            }
+            vscode.window.showInformationMessage(
+              t("Removed {0} due date(s). The task(s) are now in the Tray.", tasksOnDay.length),
+            );
+            LynvoPanel.refreshDataAndScheduleSync();
+            return;
+          }
           case "clearActivities": {
             await LynvoPanel.clearActivities();
             return;
