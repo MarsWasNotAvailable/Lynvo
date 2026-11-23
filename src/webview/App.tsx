@@ -90,8 +90,8 @@ type WebviewOutboundMessage =
   | { command: "removeCodeRefsForColumn"; colId: string }
   | { command: "assignTask"; taskId: string; identityId?: string }
   | { command: "setTaskDueDate"; taskId: string; dueDate?: number }
-  | { command: "clearDayTasks"; day: number }
-  | { command: "clearDayDueDates"; day: number }
+  | { command: "clearDayTasks"; day: number; dayEnd?: number }
+  | { command: "clearDayDueDates"; day: number; dayEnd?: number }
   | { command: "addIdentity"; displayName: string; sourceId: string; setActive?: boolean }
   | { command: "copyIdentity"; identityId: string; displayName: string; sourceId: string }
   | { command: "addLocalDomain"; name: string }
@@ -1427,6 +1427,8 @@ export const App: React.FC = () => {
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth() + 1);
   const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
   const [selectedDay, setSelectedDay] = useState<number>(() => startOfDayLocal(Date.now()));
+  // End of the day range selection (start-of-day timestamp); 0 = single day.
+  const [selectedDayEnd, setSelectedDayEnd] = useState<number>(0);
   // Status (column) filter for the Calendar task list; "" = all statuses.
   const [calendarStatusFilter, setCalendarStatusFilter] = useState<string>("");
 
@@ -2027,6 +2029,24 @@ export const App: React.FC = () => {
     setNewTaskPriority("medium");
     setNewTaskDueDate(toDateInputValue(dueDate));
     setNewTaskError("");
+  };
+
+  // Calendar selection : a plain click selects a single day (or the Tray cell);
+  // a Shift+click extends the selection to the range between the anchor day
+  // and the clicked cell (inclusive). The Tray is always a single selection.
+  const selectDayCell = (day: number, shift: boolean) => {
+    if (day === TRAY_CELL_DAY) {
+      setSelectedDay(TRAY_CELL_DAY);
+      setSelectedDayEnd(0);
+      return;
+    }
+    if (!shift || selectedDay === TRAY_CELL_DAY) {
+      setSelectedDay(day);
+      setSelectedDayEnd(0);
+      return;
+    }
+    setSelectedDay(Math.min(selectedDay, day));
+    setSelectedDayEnd(Math.max(selectedDay, day));
   };
 
   const submitNewTask = () => {
@@ -2795,41 +2815,41 @@ export const App: React.FC = () => {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px", paddingBottom: "6px", borderBottom: "1px solid var(--lynvo-border, var(--vscode-panel-border, #3a3a3a))" }}>
               <div style={{ display: "flex", gap: "2px", alignItems: "center" }}>
                 {(() => {
-                  // Workflow move buttons: two 2-state buttons that step the task
-                  // between Backlog / In-Progress / Complete (first matching column).
+                  // Workflow state buttons : (Left, Middle, Right) = (Backlog, Progress, Complete).
+                  // The task's current state stays in place, greyed out and underlined (the "cursor");
+                  // clicking another state moves the task to that state's first matching column.
                   const state = taskWorkflowState(task);
-                  const firstBacklog = firstColumnInState("backlog");
-                  const firstComplete = firstColumnInState("complete");
-                  const firstProgress = firstColumnInState("progress");
-                  const defs =
-                    state === "backlog"
-                      ? [
-                          { key: "to-progress", icon: <PlayIcon />, target: firstProgress?.id, title: t("Move to{0}", ` ${firstProgress?.title || ""}`) },
-                          { key: "to-complete", icon: <TickIcon />, target: firstComplete?.id, title: t("Move to{0}", ` ${firstComplete?.title || ""}`) },
-                        ]
-                      : state === "progress"
-                        ? [
-                            { key: "to-backlog", icon: <LastTrackIcon />, target: firstBacklog?.id, title: t("Move to{0}", ` ${firstBacklog?.title || ""}`) },
-                            { key: "to-complete", icon: <TickIcon />, target: firstComplete?.id, title: t("Move to{0}", ` ${firstComplete?.title || ""}`) },
-                          ]
-                        : [
-                            { key: "to-backlog", icon: <LastTrackIcon />, target: firstBacklog?.id, title: t("Move to{0}", ` ${firstBacklog?.title || ""}`) },
-                            { key: "to-progress", icon: <PlayIcon />, target: firstProgress?.id, title: t("Move to{0}", ` ${firstProgress?.title || ""}`) },
-                          ];
-                  return defs.map((def) => (
-                    <button
-                      key={def.key}
-                      type="button"
-                      className="icon-btn"
-                      style={{ ...iconButtonStyle, opacity: def.target ? 1 : 0.4 }}
-                      disabled={!def.target}
-                      onClick={() => def.target && vscode.postMessage({ command: "updateTaskStatus", taskId: task.id, newStatus: def.target })}
-                      title={def.target ? def.title : t("No column for this status")}
-                      aria-label={def.title}
-                    >
-                      {def.icon}
-                    </button>
-                  ));
+                  const defs = [
+                    { key: "backlog", icon: <LastTrackIcon />, column: firstColumnInState("backlog") },
+                    { key: "progress", icon: <PlayIcon />, column: firstColumnInState("progress") },
+                    { key: "complete", icon: <TickIcon />, column: firstColumnInState("complete") },
+                  ];
+                  return defs.map((def) => {
+                    const isCurrent = def.key === state;
+                    const title = isCurrent
+                      ? t("Current state{0}", ` ${def.column?.title || ""}`)
+                      : def.column
+                        ? t("Move to{0}", ` ${def.column.title}`)
+                        : t("No column for this status");
+                    return (
+                      <button
+                        key={def.key}
+                        type="button"
+                        className="icon-btn"
+                        style={{
+                          ...iconButtonStyle,
+                          opacity: def.column ? (isCurrent ? 0.5 : 1) : 0.3,
+                          borderBottom: isCurrent && def.column ? "2px solid var(--vscode-focusBorder)" : "none",
+                        }}
+                        disabled={isCurrent || !def.column}
+                        onClick={() => def.column && vscode.postMessage({ command: "updateTaskStatus", taskId: task.id, newStatus: def.column.id })}
+                        title={title}
+                        aria-label={title}
+                      >
+                        {def.icon}
+                      </button>
+                    );
+                  });
                 })()}
               </div>
               <div style={{ display: "flex", gap: "2px", alignItems: "center" }}>
@@ -3444,8 +3464,18 @@ export const App: React.FC = () => {
 
     const isTrayCell = selectedDay === TRAY_CELL_DAY;
 
-    // A day in the past hosts overdue tasks : a nudge below proposes to clear
-    // the past due dates so that the tasks move into the "no due date space" (Tray).
+    // Selection : a single day (selectedDayEnd === 0), or the inclusive range
+    // selectedDay .. selectedDayEnd (both start-of-day timestamps).
+    const lastSelectedDay = selectedDayEnd > 0 ? selectedDayEnd : selectedDay;
+    const selectionEndExclusive = (() => {
+      const end = new Date(lastSelectedDay);
+      end.setDate(end.getDate() + 1);
+      return end.getTime();
+    })();
+
+    // A selection reaching into the past hosts overdue tasks : the nudge below
+    // proposes to clear the past due dates so that the tasks move into the
+    // "no due date space" (Tray).
     const isPastDay = !isTrayCell && selectedDay < startOfDayLocal(Date.now());
 
     // Tasks shown in the right pane: those of the selected day,
@@ -3456,7 +3486,9 @@ export const App: React.FC = () => {
       .filter((task) =>
         isTrayCell
           ? typeof task.dueDate !== "number"
-          : typeof task.dueDate === "number" && isSameLocalDay(task.dueDate, selectedDay),
+          : typeof task.dueDate === "number" &&
+            task.dueDate >= selectedDay &&
+            task.dueDate < selectionEndExclusive,
       )
       .filter((task) => calendarStatusFilter === "" || task.status === calendarStatusFilter)
       .sort((a, b) => (a.position ?? a.createdAt) - (b.position ?? b.createdAt));
@@ -3505,14 +3537,18 @@ export const App: React.FC = () => {
       }
     };
 
+    const formatDay = (ts: number) =>
+      new Date(ts).toLocaleDateString(undefined, {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
     const tasksListHeaderLabel = isTrayCell
       ? t("No due date")
-      : new Date(selectedDay).toLocaleDateString(undefined, {
-          weekday: "long",
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        });
+      : selectedDayEnd > 0
+        ? `${formatDay(selectedDay)} — ${formatDay(selectedDayEnd)}`
+        : formatDay(selectedDay);
 
     // The edit / create forms temporarily replace the whole task list.
     const editingTask = editingTaskId ? boardData.tasks[editingTaskId] : undefined;
@@ -3589,7 +3625,7 @@ export const App: React.FC = () => {
             {/* The Tray cell at day cell #0: hosts every task without a due date. */}
             <button
               type="button"
-              onClick={() => setSelectedDay(TRAY_CELL_DAY)}
+              onClick={(e) => selectDayCell(TRAY_CELL_DAY, e.shiftKey)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => dropTaskOnDay(e, undefined)}
               style={{
@@ -3615,12 +3651,12 @@ export const App: React.FC = () => {
             </button>
             {cells.slice(1).map((cell) => {
               const count = filteredByDay.get(cell.ts) || 0;
-              const isSelected = cell.ts === selectedDay;
+              const isSelected = cell.ts >= selectedDay && cell.ts <= lastSelectedDay;
               return (
                 <button
                   key={cell.ts}
                   type="button"
-                  onClick={() => setSelectedDay(cell.ts)}
+                  onClick={(e) => selectDayCell(cell.ts, e.shiftKey)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => dropTaskOnDay(e, cell.ts)}
                   style={{
@@ -3671,7 +3707,7 @@ export const App: React.FC = () => {
                 * And we prefill the due date with the currently selected day - main feature of the Calendar panel.
                 */}
               <button type="button" className="icon-btn" onClick={() => openAddTaskForm(CALENDAR_CREATE_SENTINEL, selectedDay)} title={t("Add task")} aria-label={t("Add task")} style={iconButtonStyle}><PlusIcon /></button>
-              <button type="button" className="icon-btn" onClick={() => vscode.postMessage({ command: "clearDayTasks", day: selectedDay })} title={t("Remove all tasks")} aria-label={t("Remove all tasks")} style={iconButtonStyle}><BroomIcon /></button>
+              <button type="button" className="icon-btn" onClick={() => vscode.postMessage({ command: "clearDayTasks", day: selectedDay, dayEnd: selectedDayEnd > 0 ? selectedDayEnd : undefined })} title={t("Remove all tasks")} aria-label={t("Remove all tasks")} style={iconButtonStyle}><BroomIcon /></button>
               <button type="button" className="icon-btn" onClick={cycleTaskView} title={t("Switch task view (currently {0})", taskView === "collapsed" ? t("Collapsed view") : taskView === "full" ? t("Full view") : t("Normal view"))} aria-label={t("Switch task view")} style={iconButtonStyle}><EyeIcon /></button>
             </div>
           </div>
@@ -3705,7 +3741,7 @@ export const App: React.FC = () => {
                     <button
                       type="button"
                       className="icon-btn"
-                      onClick={() => vscode.postMessage({ command: "clearDayDueDates", day: selectedDay })}
+                      onClick={() => vscode.postMessage({ command: "clearDayDueDates", day: selectedDay, dayEnd: selectedDayEnd > 0 ? selectedDayEnd : undefined })}
                       title={t("Remove due dates")}
                       aria-label={t("Remove due dates")}
                       style={iconButtonStyle}
