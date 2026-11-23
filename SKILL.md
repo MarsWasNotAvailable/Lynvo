@@ -163,10 +163,12 @@ Anything else would be wrapped with quotes : “...” .
 | Value | When to Use |
 |---|---|
 | `task_created` | New task created |
-| `task_updated` | Task description, labels, priority, dueDate, or **assignee** changed; an assignment shows as `task <@> identity` (deprecated for title changes — use `task_renamed`) |
+| `task_updated` | Task description, labels, priority, or **assignee** changed; an assignment shows as `task <@> identity` (deprecated for title changes — use `task_renamed`) |
 | `task_renamed` | Task title renamed, shown as `"old" ==> "new"` |
 | `task_moved` | Task moved between columns or reordered within column, shown as `{task} ==> [column]` |
 | `task_deleted` | Task removed |
+| `duedate_updated` | Task's due date set or changed (Calendar day-cell drop), shown as `{task} ::: date` |
+| `duedate_deleted` | Task's due date cleared (dropped onto the Tray cell, or via the overdue nudge), shown as `{task}` |
 | `link_added` | Task's code TODO marker/reference added, shown as `{task}` (filePath stored in `metadata`) |
 | `link_removed` | Task's code TODO marker/reference removed (task stays on the board) |
 | `column_created` | New board column added |
@@ -192,6 +194,11 @@ Anything else would be wrapped with quotes : “...” .
 | `relation_blockedby_deleted` | a blocked-by edge removed — logged for **both** the `blocks` and `blocked-by` types, shown as `"task" <-> "task"` |
 | `relation_duplicates_added` | "duplicates" relation created, shown as `"task" <+> "task"` |
 | `relation_duplicates_deleted` | "duplicates" relation removed, shown as `"task" <-> "task"` |
+| `identity_created` | New identity registered, shown as `"name"@"domain"` |
+| `identity_renamed` | Identity display name renamed, shown as `"old"@domain ==> "new"@domain` |
+| `identity_deleted` | Identity removed (its task assignments are cleared), shown as `"name"@"domain"` |
+| `domain_created` | New domain registered, shown as `"domain"` |
+| `domain_deleted` | Domain removed (its identities are re-homed to `local` or deleted with it), shown as `"domain"` |
 
 Note: the three `*_updated` types above are kept only for backward compatibility with existing activity logs, or at worst a default case where the specific type cannot be specified;
 any new activity should use the specific `*_renamed` / `column_color_changed` types.
@@ -382,6 +389,7 @@ If a task's `status` references a deleted column, it is reassigned to the leftmo
 | `lynvo.promoteTodo` | Promote selected TODO/IDEA/FIXME comments into tasks (each gets a unique marker + `codeReference.todoId`); the comment body is captured as the task's editable description, any `[ ]`/`[x]` checklist items and `[!]`/`[&]`/`[|]`/`[=]` relation lines become the task's checklist and relations, and a `[@]` identity line sets the task's assignee |
 | `lynvo.openBoard` | Open the Kanban board webview |
 | `lynvo.openTable` | Open the table view webview |
+| `lynvo.openCalendar` | Open the calendar view webview |
 | `lynvo.openActivity` | Open the activity feed webview |
 | `lynvo.openConflicts` | Open the conflict center webview |
 | `lynvo.openLabels` | Open the labels manager webview |
@@ -708,16 +716,18 @@ General rule: non-empty beats empty when the field policy does not decide. Do no
 
 ## Webview Views
 
-The extension provides 6 views accessible via the toolbar tabs:
+The extension provides 8 panels accessible via the toolbar tabs (which ones are shown is controlled by the `lynvo.visiblePanels` setting):
 
-| View | Purpose |
+| Panel | Purpose |
 |---|---|
 | `board` | Kanban board with drag-and-drop, inline editing, checklists, relations |
 | `table` | Spreadsheet-like task overview with sortable columns |
+| `calendar` | Day-grid calendar of task due dates, with a task list for the selected day or day range |
 | `activity` | Chronological feed of all board changes |
 | `conflicts` | Sync conflict resolution UI with diff view |
 | `insights` | Project metrics (total, completed, rate, overdue, stale, in-progress) |
 | `labels` | Label creation and deletion manager |
+| `identities` | Identities and domains management, skills, and the active-identity selection |
 
 ### Board View Features
 - Drag-and-drop tasks between columns
@@ -727,11 +737,24 @@ The extension provides 6 views accessible via the toolbar tabs:
 - Column management (add, edit, reorder, delete)
 - Search and filter by label or priority
 - Task card shows: title, priority badge, labels, checklist progress, due date indicator, code reference indicator
+- **Workflow state buttons** on every task card (all card views): three fixed buttons in the order Backlog / Progress / Complete. The task's current state is greyed out and underlined (the "cursor"); clicking another state moves the task to that state's first matching column (states are derived from the `lynvo.completionColumns` / `lynvo.progressionColumns` settings); a state with no matching column is disabled
 
 ### Table View Features
 - Two modes: `rows` (spreadsheet) and `map` (node graph)
 - Row mode: sortable columns for all task fields
 - Map mode: draggable circular nodes with zoom/pan, relation lines, side panel for details
+
+### Calendar View Features
+- Split layout (~70/30): a 7-column day grid (34 day cells) on the left, a scrollable task list for the selection on the right
+- Month picker at the top; day cells show only numbers, with a centered count badge when (filtered) tasks are due that day
+- **Tray cell** (cell #0, top-left): hosts every task without a due date; dropping a task card on it clears that due date (`duedate_deleted`)
+- **Selection**: click a day to select it; Shift+click another day to select the inclusive range — the task list then shows every task due within the selection
+- **Filters**: search, label, and priority filters are shared with the Board panel; the status (column) filter is calendar-only; day-cell badges reflect the filtered counts, not the absolute ones
+- **Drag-and-drop**: dropping a task card on a day cell sets its due date to that day (`duedate_updated`); works while search/filters are active
+- **Overdue nudge**: when the selection reaches into the past, a banner offers to clear the past-due tasks' due dates so they move into the Tray
+- **Add task**: the due date is prefilled with the selected day; the new task lands in the first backlog column (neither a progression nor a completion column)
+- **Broom** (remove all): deletes every task of the selection — or of the Tray when cell #0 is selected — with a confirmation prompt
+- Task cards render exactly as on the Board (collapsed / normal / full, cycled by the shared Eye button; the preference persists per user)
 
 ## VS Code Commands Reference
 
@@ -743,6 +766,7 @@ The extension provides 6 views accessible via the toolbar tabs:
 | `lynvo.openBoard` | Lynvo: Open Project Board | Activity bar menu, Command Palette |
 | `lynvo.openInsights` | Lynvo: Open Insights View | Activity bar menu, Command Palette |
 | `lynvo.openTable` | Lynvo: Open Table View | Activity bar menu, Command Palette |
+| `lynvo.openCalendar` | Lynvo: Open Calendar View | Activity bar menu, Command Palette |
 | `lynvo.openActivity` | Lynvo: Open Activity Feed | Activity bar menu, Command Palette |
 | `lynvo.openConflicts` | Lynvo: Open Conflict Center | Activity bar menu, Command Palette |
 | `lynvo.openLabels` | Lynvo: Open Labels Manager | Activity bar menu, Command Palette |
@@ -764,6 +788,9 @@ The extension provides 6 views accessible via the toolbar tabs:
 | `createTask` | `{ title, description, targetColId, labelIds, priority, dueDate?, codeReference? }` |
 | `editTask` | `{ taskId, title, description, labelIds, priority, dueDate? }` |
 | `deleteTask` | `{ taskId }` |
+| `setTaskDueDate` | `{ taskId, dueDate? }` — `dueDate` omitted/undefined clears it (Tray cell drop) |
+| `clearDayTasks` | `{ day, dayEnd? }` — `day` 0 = Tray cell (no-due-date tasks); `dayEnd` = inclusive range end (Shift+click selection) |
+| `clearDayDueDates` | `{ day, dayEnd? }` — clears only the past-due tasks of the selection (overdue nudge) |
 | `addChecklistItem` | `{ taskId, text }` |
 | `updateChecklistItem` | `{ taskId, itemId, text?, done? }` |
 | `deleteChecklistItem` | `{ taskId, itemId }` |
@@ -783,7 +810,7 @@ The extension provides 6 views accessible via the toolbar tabs:
 | Command | Payload |
 |---|---|
 | `loadData` | `{ data: LynvoBoard | null }` |
-| `switchView` | `{ view: "board" | "table" | "activity" | "conflicts" | "insights" | "labels" }` |
+| `switchView` | `{ view: "board" | "table" | "calendar" | "activity" | "conflicts" | "insights" | "labels" | "identities" }` |
 
 ## File Watcher
 
@@ -957,6 +984,8 @@ The extension writes `settings.json` as an empty object `{}` on every save. Do n
 | Create task | Write `tasks/{taskId}.json` + `activity/{activityId}.json` | `task_created` |
 | Update task | Modify `tasks/{taskId}.json` + write `activity/{activityId}.json` | `task_updated` |
 | Move task | Modify `status` in `tasks/{taskId}.json` + write activity | `task_moved` |
+| Set due date | Modify `dueDate` in `tasks/{taskId}.json` + write activity | `duedate_updated` |
+| Clear due date | Remove `dueDate` from `tasks/{taskId}.json` + write activity | `duedate_deleted` |
 | Delete task | Remove `tasks/{taskId}.json` + update `metadata/tombstones.json` + write activity | `task_deleted` |
 | Add checklist | Modify `tasks/{taskId}.json` + write activity | `checklist_added` |
 | Toggle checklist | Modify `tasks/{taskId}.json` + write activity | `checklist_updated` |
